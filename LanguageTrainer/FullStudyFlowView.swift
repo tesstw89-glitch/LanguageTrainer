@@ -2,7 +2,8 @@ import SwiftUI
 
 struct FullStudyFlowView: View {
     let language: AppLanguage
-    let terms: [TermPair]
+    let sentenceTerms: [TermPair]
+    let lemmaTerms: [TermPair]
 
     private enum Step {
         case match, dragFill, write, speak, done
@@ -57,7 +58,7 @@ struct FullStudyFlowView: View {
         case .match:
             MatchView(
                 language: language,
-                allTerms: terms,
+                allTerms: lemmaTerms,
                 secondsTotalOverride: 120,
                 onFinished: { goNext() }
             )
@@ -65,7 +66,7 @@ struct FullStudyFlowView: View {
         case .dragFill:
             DragFillView(
                 language: language,
-                terms: terms,
+                terms: sentenceTerms,
                 totalQsOverride: 20,
                 onFinished: { goNext() }
             )
@@ -73,7 +74,7 @@ struct FullStudyFlowView: View {
         case .write:
             WriteView(
                 language: language,
-                terms: terms,
+                terms: lemmaTerms,
                 totalQsOverride: 10,
                 onFinished: { goNext() }
             )
@@ -81,7 +82,7 @@ struct FullStudyFlowView: View {
         case .speak:
             SpeakView(
                 language: language,
-                terms: terms,
+                terms: sentenceTerms,
                 totalQsOverride: 10,
                 onFinished: { goNext() }
             )

@@ -4,6 +4,8 @@ struct ContentView: View {
     @State private var path = NavigationPath()
     @State private var didPrintFrenchVoices = false
 
+    private let itemsPerWeek: Int = 200
+
     var body: some View {
         NavigationStack(path: $path) {
             ZStack {
@@ -51,50 +53,68 @@ struct ContentView: View {
         case .chooseWeek(let lang):
             ChooseWeekView(
                 language: lang,
-                allTerms: LanguageDataLoader.terms(for: lang),
-                itemsPerWeek: 200
+                allTerms: allSentenceTerms(for: lang),
+                itemsPerWeek: itemsPerWeek
             )
 
+        // MARK: - Lemma / chunk exercises only
+
         case .match(let lang, let week):
-            let all = LanguageDataLoader.terms(for: lang)
-            let terms = WeekEngine(itemsPerWeek: 200).terms(forWeek: week, allTerms: all)
-            MatchView(language: lang, allTerms: terms)
-
-        case .dragAndFill(let lang, let week):
-            let all = LanguageDataLoader.terms(for: lang)
-            let terms = WeekEngine(itemsPerWeek: 200).terms(forWeek: week, allTerms: all)
-            DragFillView(language: lang, terms: terms)
-
-        case .speak(let lang, let week):
-            let all = LanguageDataLoader.terms(for: lang)
-            let terms = WeekEngine(itemsPerWeek: 200).terms(forWeek: week, allTerms: all)
-            SpeakView(language: lang, terms: terms)
+            MatchView(
+                language: lang,
+                allTerms: lemmaTerms(for: lang, week: week)
+            )
 
         case .listenMatch(let lang, let week):
-            let all = LanguageDataLoader.terms(for: lang)
-            let terms = WeekEngine(itemsPerWeek: 200).terms(forWeek: week, allTerms: all)
-            ListenMatchView(language: lang, allTerms: terms)
-
-        case .write(let lang, let week):
-            let all = LanguageDataLoader.terms(for: lang)
-            let terms = WeekEngine(itemsPerWeek: 200).terms(forWeek: week, allTerms: all)
-            WriteView(language: lang, terms: terms)
+            ListenMatchView(
+                language: lang,
+                allTerms: lemmaTerms(for: lang, week: week)
+            )
 
         case .matchWrite(let lang, let week):
-            let all = LanguageDataLoader.terms(for: lang)
-            let terms = WeekEngine(itemsPerWeek: 200).terms(forWeek: week, allTerms: all)
-            MatchWriteView(language: lang, allTerms: terms)
+            MatchWriteView(
+                language: lang,
+                allTerms: lemmaTerms(for: lang, week: week)
+            )
+
+        case .write(let lang, let week):
+            WriteView(
+                language: lang,
+                terms: lemmaTerms(for: lang, week: week)
+            )
+
+        case .listenWrite(let lang, let week):
+            ListenWriteView(
+                language: lang,
+                terms: lemmaTerms(for: lang, week: week),
+                totalQsOverride: 12
+            )
+
+        // MARK: - Full sentence exercises only
+
+        case .dragAndFill(let lang, let week):
+            DragFillView(
+                language: lang,
+                terms: sentenceTerms(for: lang, week: week)
+            )
+
+        case .speak(let lang, let week):
+            SpeakView(
+                language: lang,
+                terms: sentenceTerms(for: lang, week: week)
+            )
+
+        // MARK: - Full Study Flow uses both
 
         case .fullStudyFlow(let lang, let week):
-            let all = LanguageDataLoader.terms(for: lang)
-            let terms = WeekEngine(itemsPerWeek: 200).terms(forWeek: week, allTerms: all)
-            FullStudyFlowView(language: lang, terms: terms)
-            
-        case .listenWrite(let lang, let week):
-            let all = LessonsDataLoader.lessons(for: lang)
-            let sentences = WeekEngine(itemsPerWeek: 30).terms(forWeek: week, allTerms: all)
-            ListenWriteView(language: lang, terms: sentences, totalQsOverride: 12)
-            
+            FullStudyFlowView(
+                language: lang,
+                sentenceTerms: sentenceTerms(for: lang, week: week),
+                lemmaTerms: lemmaTerms(for: lang, week: week)
+            )
+
+        // MARK: - Existing lesson routes
+
         case .lessonsHome(let lang):
             LessonsHomeView(language: lang)
 
@@ -112,6 +132,30 @@ struct ContentView: View {
         }
     }
 
+    // MARK: - Data helpers
+
+    private func allLessonItems(for language: AppLanguage) -> [LessonItem] {
+        LessonsDataLoader.lessonItems(for: language)
+    }
+
+    private func allSentenceTerms(for language: AppLanguage) -> [TermPair] {
+        LessonsDataLoader.lessons(for: language)
+    }
+
+    private func sentenceTerms(for language: AppLanguage, week: Int) -> [TermPair] {
+        let lessons = allLessonItems(for: language)
+
+        return WeekEngine(itemsPerWeek: itemsPerWeek)
+            .lessonSentences(forWeek: week, allLessons: lessons)
+    }
+
+    private func lemmaTerms(for language: AppLanguage, week: Int) -> [TermPair] {
+        let lessons = allLessonItems(for: language)
+
+        return WeekEngine(itemsPerWeek: itemsPerWeek)
+            .lemmaTerms(forWeek: week, allLessons: lessons)
+    }
+
     private func langButton(_ title: String, color: Color) -> some View {
         Text(title)
             .font(.system(size: 28, weight: .bold, design: .rounded))
@@ -123,11 +167,14 @@ struct ContentView: View {
 }
 
 // MARK: - Weeks shell with separate current week per language
+
 private struct WeeksViewShell: View {
     let language: AppLanguage
 
     @AppStorage("currentWeek_french") private var currentWeekFrench: Int = 1
     @AppStorage("currentWeek_spanish") private var currentWeekSpanish: Int = 1
+
+    private let itemsPerWeek: Int = 200
 
     private var currentWeekBinding: Binding<Int> {
         Binding(
@@ -147,20 +194,23 @@ private struct WeeksViewShell: View {
     var body: some View {
         WeeksView(
             language: language,
-            allTerms: LanguageDataLoader.terms(for: language),
-            currentWeek: currentWeekBinding,
-            itemsPerWeek: 200
+            terms: termsForLanguage,
+            currentWeek: $currentWeek,
+            itemsPerWeek: itemsPerWeek
         )
     }
 }
 
 // MARK: - Start New Week jump with separate current week per language
+
 private struct StartNewWeekJump: View {
     let lang: AppLanguage
     @Binding var path: NavigationPath
 
     @AppStorage("currentWeek_french") private var currentWeekFrench: Int = 1
     @AppStorage("currentWeek_spanish") private var currentWeekSpanish: Int = 1
+
+    private let itemsPerWeek: Int = 200
 
     private var currentWeek: Int {
         get {
@@ -178,9 +228,13 @@ private struct StartNewWeekJump: View {
     var body: some View {
         Color.clear
             .onAppear {
-                let all = LanguageDataLoader.terms(for: lang)
-                let engine = WeekEngine(itemsPerWeek: 200)
-                currentWeek = engine.nextWeek(from: currentWeek, termCount: all.count)
+                let allLessons = LessonsDataLoader.lessonItems(for: lang)
+                let engine = WeekEngine(itemsPerWeek: itemsPerWeek)
+
+                currentWeek = engine.nextWeek(
+                    from: currentWeek,
+                    termCount: allLessons.count
+                )
 
                 path.removeLast(path.count)
                 path.append(AppRoute.exerciseHome(lang))

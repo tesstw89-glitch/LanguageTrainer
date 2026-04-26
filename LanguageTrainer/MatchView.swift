@@ -226,8 +226,30 @@ struct MatchView: View {
 
     // MARK: - Eligibility
 
+    // MARK: - Eligibility
+
     private var eligibleTerms: [TermPair] {
-        allTerms.filter { wordCount($0.foreign) <= 7 }
+        dedupedTerms(allTerms)
+            .filter { !$0.foreign.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+            .filter { !$0.english.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+            .filter { wordCount($0.foreign) <= 7 }
+    }
+
+    private func dedupedTerms(_ terms: [TermPair]) -> [TermPair] {
+        var seen = Set<String>()
+
+        return terms.filter { term in
+            let key = normaliseKey(term.foreign) + "||" + normaliseKey(term.english)
+            return seen.insert(key).inserted
+        }
+    }
+
+    private func normaliseKey(_ text: String) -> String {
+        text
+            .lowercased()
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .replacingOccurrences(of: "’", with: "'")
+            .replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
     }
 
     private func wordCount(_ s: String) -> Int {
@@ -283,6 +305,7 @@ struct MatchView: View {
         if !isSoundMuted {
             speaker.speak(term.foreign, languageCode: speechCode)
         }
+
         selectedLeft = term.id
         tryResolveMatch()
     }

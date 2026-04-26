@@ -23,8 +23,17 @@ struct ChooseWeekView: View {
         )
     }
 
-    private var engine: WeekEngine { WeekEngine(itemsPerWeek: itemsPerWeek) }
-    private var totalWeeks: Int { engine.totalWeeks(termCount: allTerms.count) }
+    private var engine: WeekEngine {
+        WeekEngine(itemsPerWeek: itemsPerWeek)
+    }
+
+    private var allLessonItems: [LessonItem] {
+        LessonsDataLoader.lessonItems(for: language)
+    }
+
+    private var totalWeeks: Int {
+        engine.totalWeeks(termCount: allLessonItems.count)
+    }
 
     @State private var selectedWeeks: Set<Int> = []
 
@@ -32,9 +41,15 @@ struct ChooseWeekView: View {
         selectedWeeks.sorted()
     }
 
-    private var selectedTerms: [TermPair] {
+    private var selectedSentenceTerms: [TermPair] {
         sortedSelectedWeeks.flatMap { week in
-            engine.terms(forWeek: week, allTerms: allTerms)
+            engine.lessonSentences(forWeek: week, allLessons: allLessonItems)
+        }
+    }
+
+    private var selectedLemmaTerms: [TermPair] {
+        sortedSelectedWeeks.flatMap { week in
+            engine.lemmaTerms(forWeek: week, allLessons: allLessonItems)
         }
     }
 
@@ -56,7 +71,10 @@ struct ChooseWeekView: View {
 
                 HStack(spacing: 10) {
                     Button("Select current week") {
-                        let cw = engine.clampWeek(currentWeek.wrappedValue, termCount: allTerms.count)
+                        let cw = engine.clampWeek(
+                            currentWeek.wrappedValue,
+                            termCount: allLessonItems.count
+                        )
                         selectedWeeks = [cw]
                     }
 
@@ -70,7 +88,10 @@ struct ChooseWeekView: View {
                 }
                 .buttonStyle(.bordered)
 
-                LazyVGrid(columns: [GridItem(.adaptive(minimum: 95), spacing: 10)], spacing: 10) {
+                LazyVGrid(
+                    columns: [GridItem(.adaptive(minimum: 95), spacing: 10)],
+                    spacing: 10
+                ) {
                     ForEach(1...max(1, totalWeeks), id: \.self) { week in
                         Button {
                             if selectedWeeks.contains(week) {
@@ -105,7 +126,11 @@ struct ChooseWeekView: View {
                         .font(.system(size: 15, weight: .semibold, design: .rounded))
                         .multilineTextAlignment(.center)
 
-                    Text("Terms in selected weeks: \(selectedTerms.count)")
+                    Text("Sentences in selected weeks: \(selectedSentenceTerms.count)")
+                        .font(.system(size: 15, weight: .semibold, design: .rounded))
+                        .foregroundStyle(.secondary)
+
+                    Text("Lemmas in selected weeks: \(selectedLemmaTerms.count)")
                         .font(.system(size: 15, weight: .semibold, design: .rounded))
                         .foregroundStyle(.secondary)
                 }
@@ -113,31 +138,49 @@ struct ChooseWeekView: View {
 
                 VStack(spacing: 10) {
                     NavigationLink("Match") {
-                        MatchView(language: language, allTerms: selectedTerms)
+                        MatchView(language: language, allTerms: selectedLemmaTerms)
                     }
-                    NavigationLink("Drag & Fill") {
-                        DragFillView(language: language, terms: selectedTerms)
-                    }
-                    NavigationLink("Speak") {
-                        SpeakView(language: language, terms: selectedTerms)
-                    }
+
                     NavigationLink("Listen & Match") {
-                        ListenMatchView(language: language, allTerms: selectedTerms)
+                        ListenMatchView(language: language, allTerms: selectedLemmaTerms)
                     }
+
                     NavigationLink("Write") {
-                        WriteView(language: language, terms: selectedTerms)
+                        WriteView(language: language, terms: selectedLemmaTerms)
                     }
+
                     NavigationLink("Match & Write") {
-                        MatchWriteView(language: language, allTerms: selectedTerms)
+                        MatchWriteView(language: language, allTerms: selectedLemmaTerms)
                     }
+
+                    NavigationLink("Listen & Write") {
+                        ListenWriteView(
+                            language: language,
+                            terms: selectedLemmaTerms,
+                            totalQsOverride: 12
+                        )
+                    }
+
+                    NavigationLink("Drag & Fill") {
+                        DragFillView(language: language, terms: selectedSentenceTerms)
+                    }
+
+                    NavigationLink("Speak") {
+                        SpeakView(language: language, terms: selectedSentenceTerms)
+                    }
+
                     NavigationLink("Full Study Flow") {
-                        FullStudyFlowView(language: language, terms: selectedTerms)
+                        FullStudyFlowView(
+                            language: language,
+                            sentenceTerms: selectedSentenceTerms,
+                            lemmaTerms: selectedLemmaTerms
+                        )
                     }
                 }
                 .buttonStyle(.borderedProminent)
                 .padding(.horizontal, 18)
                 .padding(.top, 6)
-                .disabled(selectedTerms.isEmpty)
+                .disabled(selectedSentenceTerms.isEmpty)
 
                 Button {
                     if let firstSelected = sortedSelectedWeeks.first {
@@ -157,7 +200,11 @@ struct ChooseWeekView: View {
         .navigationTitle("Choose weeks")
         .navigationBarTitleDisplayMode(.inline)
         .onAppear {
-            let cw = engine.clampWeek(currentWeek.wrappedValue, termCount: allTerms.count)
+            let cw = engine.clampWeek(
+                currentWeek.wrappedValue,
+                termCount: allLessonItems.count
+            )
+
             currentWeek.wrappedValue = cw
 
             if selectedWeeks.isEmpty {

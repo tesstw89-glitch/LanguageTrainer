@@ -85,6 +85,10 @@ struct DragFillView: View {
 
                 HStack(spacing: 10) {
                     Button {
+                        if isSoundMuted {
+                            isSoundMuted = false
+                        }
+
                         playCurrentForeign()
                     } label: {
                         Image(systemName: isSoundMuted ? "speaker.slash.fill" : "speaker.wave.2.fill")
@@ -407,7 +411,8 @@ struct DragFillView: View {
     // MARK: - Audio
 
     private func playCurrentForeign() {
-        guard let current, !isSoundMuted else { return }
+        guard let current else { return }
+
         let cleaned = cleanForeignForDrag(current.foreign)
         speaker.speak(cleaned, languageCode: speechCode)
     }

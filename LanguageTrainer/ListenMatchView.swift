@@ -20,126 +20,42 @@ struct ListenMatchView: View {
     @State private var selectedLeft: UUID? = nil
     @State private var selectedRight: UUID? = nil
 
-    // Overlay magnify (for English only)
+    // Overlay magnify for English only
     struct MagnifyPayload: Identifiable, Equatable {
         let id = UUID()
         let text: String
         let title: String
     }
+
     @State private var magnify: MagnifyPayload? = nil
 
     // Timer
     @State private var secondsLeft: Int = 120
     @State private var timeUp: Bool = false
+
     private let ticker = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
 
     private var speechCode: String {
         switch language {
-        case .french:  return "fr-FR"
-        case .spanish: return "es-ES"
+        case .french:
+            return "fr-FR"
+        case .spanish:
+            return "es-ES"
         }
     }
 
     var body: some View {
         ZStack {
-            LinearGradient(
-                colors: [Color(.systemBackground), Color(.systemBackground).opacity(0.92)],
-                startPoint: .top, endPoint: .bottom
-            )
-            .ignoresSafeArea()
+            backgroundView
 
             VStack(spacing: 14) {
-
-                // Top bar
-                HStack {
-                    Text("Time left: \(format(secondsLeft))")
-                        .font(.system(size: 16, weight: .semibold, design: .rounded))
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 8)
-                        .background(Color.black.opacity(0.06))
-                        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-
-                    Spacer()
-
-                    if timeUp {
-                        Button { dismiss() } label: {
-                            Text("Home")
-                                .font(.system(size: 16, weight: .bold, design: .rounded))
-                                .foregroundColor(.white)
-                                .padding(.horizontal, 14)
-                                .padding(.vertical, 10)
-                                .background(Color.blue.opacity(0.85))
-                                .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-                        }
-                        .buttonStyle(.plain)
-                    }
-                }
-                .padding(.horizontal, 18)
-                .padding(.top, 12)
-
-                // Columns
-                HStack(alignment: .top, spacing: 12) {
-
-                    // LEFT: Audio buttons (foreign hidden)
-                    ScrollView {
-                        VStack(spacing: 10) {
-                            ForEach(leftOrder, id: \.self) { id in
-                                if let term = visible.first(where: { $0.id == id }) {
-
-                                    ListenToken(isSelected: selectedLeft == id)
-                                        .simultaneousGesture(
-                                            TapGesture().onEnded {
-                                                guard !timeUp else { return }
-                                                handleLeftTap(term)
-                                            }
-                                        )
-                                }
-                            }
-                        }
-                        .padding(.vertical, 4)
-                    }
-
-                    // RIGHT: English text
-                    ScrollView {
-                        VStack(spacing: 10) {
-                            ForEach(rightOrder, id: \.self) { id in
-                                if let term = visible.first(where: { $0.id == id }) {
-
-                                    MatchToken(
-                                        text: term.english,
-                                        isSelected: selectedRight == id
-                                    )
-                                    // Double tap = overlay magnify
-                                    .highPriorityGesture(
-                                        TapGesture(count: 2).onEnded {
-                                            guard !timeUp else { return }
-                                            magnify = MagnifyPayload(
-                                                text: term.english,
-                                                title: "English"
-                                            )
-                                        }
-                                    )
-                                    // Single tap = select
-                                    .simultaneousGesture(
-                                        TapGesture().onEnded {
-                                            guard !timeUp else { return }
-                                            handleRightTap(term)
-                                        }
-                                    )
-                                }
-                            }
-                        }
-                        .padding(.vertical, 4)
-                    }
-                }
-                .padding(.horizontal, 18)
-
+                topBar
+                columnsView
                 Spacer(minLength: 12)
             }
 
-            // Floating magnify overlay
             if let magnify {
-                MagnifyOverlay(
+                ListenMatchMagnifyOverlay(
                     title: magnify.title,
                     text: magnify.text,
                     onClose: { self.magnify = nil }
@@ -148,24 +64,141 @@ struct ListenMatchView: View {
                 .zIndex(999)
             }
         }
-        .onAppear { startGame() }
+        .onAppear {
+            startGame()
+        }
         .onReceive(ticker) { _ in
-            guard !timeUp else { return }
-            secondsLeft -= 1
-            if secondsLeft <= 0 {
-                secondsLeft = 0
-                timeUp = true
-                selectedLeft = nil
-                selectedRight = nil
-                magnify = nil
-            }
+            handleTick()
         }
         .animation(.easeInOut(duration: 0.18), value: magnify != nil)
     }
 
-    // MARK: - Eligibility (foreign <= 7 words)
+    // MARK: - Main subviews
+
+    private var backgroundView: some View {
+        LinearGradient(
+            colors: [Color(.systemBackground), Color(.systemBackground).opacity(0.92)],
+            startPoint: .top,
+            endPoint: .bottom
+        )
+        .ignoresSafeArea()
+    }
+
+    private var topBar: some View {
+        HStack {
+            Text("Time left: \(format(secondsLeft))")
+                .font(.system(size: 16, weight: .semibold, design: .rounded))
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+                .background(Color.black.opacity(0.06))
+                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+
+            Spacer()
+
+            if timeUp {
+                Button {
+                    dismiss()
+                } label: {
+                    Text("Home")
+                        .font(.system(size: 16, weight: .bold, design: .rounded))
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 10)
+                        .background(Color.blue.opacity(0.85))
+                        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(.horizontal, 18)
+        .padding(.top, 12)
+    }
+
+    private var columnsView: some View {
+        HStack(alignment: .top, spacing: 12) {
+            leftColumn
+            rightColumn
+        }
+        .padding(.horizontal, 18)
+    }
+
+    private var leftColumn: some View {
+        ScrollView {
+            VStack(spacing: 10) {
+                ForEach(leftOrder, id: \.self) { id in
+                    if let term = visible.first(where: { $0.id == id }) {
+                        ListenToken(isSelected: selectedLeft == id)
+                            .simultaneousGesture(
+                                TapGesture().onEnded {
+                                    guard !timeUp else { return }
+                                    handleLeftTap(term)
+                                }
+                            )
+                    }
+                }
+            }
+            .padding(.vertical, 4)
+        }
+    }
+
+    private var rightColumn: some View {
+        ScrollView {
+            VStack(spacing: 10) {
+                ForEach(rightOrder, id: \.self) { id in
+                    if let term = visible.first(where: { $0.id == id }) {
+                        ListenMatchTextToken(
+                            text: term.english,
+                            isSelected: selectedRight == id
+                        )
+                        .highPriorityGesture(
+                            TapGesture(count: 2).onEnded {
+                                guard !timeUp else { return }
+
+                                magnify = MagnifyPayload(
+                                    text: term.english,
+                                    title: "English"
+                                )
+                            }
+                        )
+                        .simultaneousGesture(
+                            TapGesture().onEnded {
+                                guard !timeUp else { return }
+                                handleRightTap(term)
+                            }
+                        )
+                    }
+                }
+            }
+            .padding(.vertical, 4)
+        }
+    }
+
+    // MARK: - Eligibility
+
+    // MARK: - Eligibility
+
     private var eligibleTerms: [TermPair] {
-        allTerms.filter { wordCount($0.foreign) <= 7 }
+        return dedupedTerms(allTerms)
+            .filter { !$0.foreign.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+            .filter { !$0.english.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+            .filter { wordCount($0.foreign) <= 7 }
+    }
+
+    private func dedupedTerms(_ terms: [TermPair]) -> [TermPair] {
+        var seen = Set<String>()
+
+        return terms.filter { term in
+            let key = normaliseKey(term.foreign) + "||" + normaliseKey(term.english)
+            return seen.insert(key).inserted
+        }
+    }
+
+    private func normaliseKey(_ text: String) -> String {
+        text
+            .lowercased()
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .replacingOccurrences(of: "’", with: "'")
+            .replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
     }
 
     private func wordCount(_ s: String) -> Int {
@@ -175,6 +208,7 @@ struct ListenMatchView: View {
     }
 
     // MARK: - Game setup
+
     private func startGame() {
         secondsLeft = secondsTotal
         timeUp = false
@@ -196,9 +230,27 @@ struct ListenMatchView: View {
         rightOrder = ids.fisherYatesShuffled()
     }
 
+    // MARK: - Timer
+
+    private func handleTick() {
+        guard !timeUp else { return }
+
+        secondsLeft -= 1
+
+        if secondsLeft <= 0 {
+            secondsLeft = 0
+            timeUp = true
+            selectedLeft = nil
+            selectedRight = nil
+            magnify = nil
+        }
+    }
+
     // MARK: - Tap handling
+
     private func handleLeftTap(_ term: TermPair) {
         speaker.speak(term.foreign, languageCode: speechCode)
+
         selectedLeft = term.id
         tryResolveMatch()
     }
@@ -248,8 +300,10 @@ struct ListenMatchView: View {
 }
 
 // MARK: - Left token: rounded square audio-only
+
 private struct ListenToken: View {
     let isSelected: Bool
+
     private let size: CGFloat = 56
 
     var body: some View {
@@ -267,13 +321,14 @@ private struct ListenToken: View {
                 .foregroundStyle(Color.black.opacity(0.85))
         }
         .frame(maxWidth: .infinity)
-        .frame(height: size)     // uniform height like your MatchToken
+        .frame(height: size)
         .contentShape(Rectangle())
     }
 }
 
-// MARK: - English token (same as yours)
-private struct MatchToken: View {
+// MARK: - English token
+
+private struct ListenMatchTextToken: View {
     let text: String
     let isSelected: Bool
 
@@ -300,8 +355,9 @@ private struct MatchToken: View {
     }
 }
 
-// MARK: - Magnify overlay (same as yours)
-private struct MagnifyOverlay: View {
+// MARK: - Magnify overlay
+
+private struct ListenMatchMagnifyOverlay: View {
     let title: String
     let text: String
     let onClose: () -> Void
@@ -310,7 +366,9 @@ private struct MagnifyOverlay: View {
         ZStack {
             Color.black.opacity(0.35)
                 .ignoresSafeArea()
-                .onTapGesture { onClose() }
+                .onTapGesture {
+                    onClose()
+                }
 
             VStack(spacing: 12) {
                 HStack {

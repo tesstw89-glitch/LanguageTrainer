@@ -4,7 +4,6 @@ struct WriteView: View {
     let language: AppLanguage
     let terms: [TermPair]
 
-    // Overrides for FullStudyFlow / Lessons
     let totalQsOverride: Int?
     let onFinished: (() -> Void)?
     let onCorrect: ((TermPair) -> Void)?
@@ -40,12 +39,22 @@ struct WriteView: View {
         }
     }
 
+    private var languageName: String {
+        switch language {
+        case .french:
+            return "French"
+        case .spanish:
+            return "Spanish"
+        }
+    }
+
     @State private var queue: [TermPair] = []
     @State private var index: Int = 0
     @State private var current: TermPair? = nil
 
     @State private var typed: String = ""
     @State private var isCorrect: Bool = false
+    @State private var hasReportedCorrect: Bool = false
 
     @FocusState private var isFocused: Bool
 
@@ -57,7 +66,9 @@ struct WriteView: View {
                 topBar
                 promptView
                 answerBox
+                correctAnswerView
                 nextButton
+
                 Spacer()
             }
         }
@@ -67,11 +78,14 @@ struct WriteView: View {
         }
     }
 
-    // MARK: - Main subviews
+    // MARK: - Views
 
     private var backgroundView: some View {
         LinearGradient(
-            colors: [Color(.systemBackground), Color(.systemBackground).opacity(0.92)],
+            colors: [
+                Color(.systemBackground),
+                Color(.systemBackground).opacity(0.92)
+            ],
             startPoint: .top,
             endPoint: .bottom
         )
@@ -114,7 +128,7 @@ struct WriteView: View {
             if let current {
                 HStack(spacing: 8) {
                     Button {
-                        speaker.speak(current.foreign, languageCode: speechCode)
+                        speaker.speak(cleanForWrite(current.foreign), languageCode: speechCode)
                     } label: {
                         Image(systemName: "speaker.wave.2.fill")
                             .font(.system(size: 18, weight: .semibold))
@@ -134,37 +148,39 @@ struct WriteView: View {
     }
 
     private var answerBox: some View {
-        VStack(spacing: 10) {
-            TextField("Type the \(language == .french ? "French" : "Spanish")…", text: $typed)
-                .font(.system(size: 18, weight: .semibold, design: .rounded))
-                .textInputAutocapitalization(.never)
-                .autocorrectionDisabled(true)
-                .padding(.horizontal, 14)
-                .padding(.vertical, 14)
-                .background(Color.white.opacity(0.92))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 16, style: .continuous)
-                        .stroke(isCorrect ? Color.green : Color.black.opacity(0.15), lineWidth: 2)
-                )
-                .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-                .shadow(color: Color.black.opacity(0.10), radius: 6, y: 3)
-                .focused($isFocused)
-                .onChange(of: typed) { _, _ in
-                    checkAnswer()
-                }
-                .onSubmit {
-                    checkAnswer()
-                }
-
-            if isCorrect, let current {
-                Text(cleanForWrite(current.foreign))
-                    .font(.system(size: 16, weight: .semibold, design: .rounded))
-                    .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center)
-                    .padding(.horizontal, 18)
+        TextField("Type the \(languageName)…", text: $typed)
+            .font(.system(size: 18, weight: .semibold, design: .rounded))
+            .textInputAutocapitalization(.never)
+            .autocorrectionDisabled(true)
+            .submitLabel(.done)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 14)
+            .background(Color.white.opacity(0.92))
+            .overlay(
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .stroke(isCorrect ? Color.green : Color.black.opacity(0.15), lineWidth: 2)
+            )
+            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .shadow(color: Color.black.opacity(0.10), radius: 6, y: 3)
+            .padding(.horizontal, 18)
+            .focused($isFocused)
+            .onChange(of: typed) { _, _ in
+                checkAnswer()
             }
+            .onSubmit {
+                checkAnswer()
+            }
+    }
+
+    @ViewBuilder
+    private var correctAnswerView: some View {
+        if isCorrect, let current {
+            Text(cleanForWrite(current.foreign))
+                .font(.system(size: 16, weight: .semibold, design: .rounded))
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, 18)
         }
-        .padding(.horizontal, 18)
     }
 
     private var nextButton: some View {
@@ -188,35 +204,6 @@ struct WriteView: View {
         .allowsHitTesting(isCorrect)
     }
 
-    // MARK: - Source terms
-
-    private var writeTerms: [TermPair] {
-        let lemmaTerms = terms.flatMap { $0.lemmas ?? [] }
-
-        let sourceTerms = lemmaTerms.isEmpty ? terms : lemmaTerms
-
-        return dedupedTerms(sourceTerms)
-            .filter { !$0.foreign.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
-            .filter { !$0.english.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
-    }
-
-    private func dedupedTerms(_ terms: [TermPair]) -> [TermPair] {
-        var seen = Set<String>()
-
-        return terms.filter { term in
-            let key = normaliseKey(term.foreign) + "||" + normaliseKey(term.english)
-            return seen.insert(key).inserted
-        }
-    }
-
-    private func normaliseKey(_ text: String) -> String {
-        text
-            .lowercased()
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-            .replacingOccurrences(of: "’", with: "'")
-            .replacingOccurrences(of: "  ", with: " ")
-    }
-
     // MARK: - Queue
 
     private func startQueue() {
@@ -224,10 +211,11 @@ struct WriteView: View {
 
         guard !pool.isEmpty else {
             queue = []
-            current = nil
             index = 0
+            current = nil
             typed = ""
             isCorrect = false
+            hasReportedCorrect = false
             return
         }
 
@@ -236,12 +224,20 @@ struct WriteView: View {
         loadCurrent()
     }
 
+    private var writeTerms: [TermPair] {
+        dedupedTerms(terms)
+            .filter { !$0.foreign.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+            .filter { !$0.english.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+    }
+
     private func loadCurrent() {
         isCorrect = false
+        hasReportedCorrect = false
         typed = ""
 
         guard index < queue.count else {
             current = nil
+            onFinished?()
             return
         }
 
@@ -256,10 +252,6 @@ struct WriteView: View {
         guard isCorrect else { return }
 
         UIImpactFeedbackGenerator(style: .medium).impactOccurred()
-
-        if index < queue.count {
-            onCorrect?(queue[index])
-        }
 
         let nextIndex = index + 1
 
@@ -289,10 +281,32 @@ struct WriteView: View {
             UIImpactFeedbackGenerator(style: .light).impactOccurred()
         }
 
+        if ok && !hasReportedCorrect {
+            hasReportedCorrect = true
+            onCorrect?(current)
+        }
+
         isCorrect = ok
     }
 
     // MARK: - Cleaning
+
+    private func dedupedTerms(_ terms: [TermPair]) -> [TermPair] {
+        var seen = Set<String>()
+
+        return terms.filter { term in
+            let key = normaliseKey(term.foreign) + "||" + normaliseKey(term.english)
+            return seen.insert(key).inserted
+        }
+    }
+
+    private func normaliseKey(_ text: String) -> String {
+        text
+            .lowercased()
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .replacingOccurrences(of: "’", with: "'")
+            .replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
+    }
 
     private func cleanForWrite(_ s: String) -> String {
         var out = s

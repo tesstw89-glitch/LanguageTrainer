@@ -113,7 +113,7 @@ struct ContentView: View {
                 lemmaTerms: lemmaTerms(for: lang, week: week)
             )
 
-        // MARK: - Existing lesson routes
+        // MARK: - Lesson routes
 
         case .lessonsHome(let lang):
             LessonsHomeView(language: lang)
@@ -191,11 +191,15 @@ private struct WeeksViewShell: View {
         )
     }
 
+    private var termsForLanguage: [TermPair] {
+        LessonsDataLoader.lessons(for: language)
+    }
+
     var body: some View {
         WeeksView(
             language: language,
             terms: termsForLanguage,
-            currentWeek: $currentWeek,
+            currentWeek: currentWeekBinding,
             itemsPerWeek: itemsPerWeek
         )
     }

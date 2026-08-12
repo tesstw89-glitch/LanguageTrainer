@@ -162,6 +162,7 @@ struct DragFillView: View {
                     .accessibilityLabel(tokenAudioOn ? "Turn token audio off" : "Turn token audio on")
 
                     if let current {
+                        ContextHelpButton(context: current.context)
                         StarButton(id: current.id)
                     }
                 }

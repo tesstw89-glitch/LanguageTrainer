@@ -1,4 +1,5 @@
 import SwiftUI
+import Foundation
 
 struct ExerciseHomeView: View {
     let language: AppLanguage
@@ -6,12 +7,22 @@ struct ExerciseHomeView: View {
 
     @AppStorage("currentWeek_french") private var currentWeekFrench: Int = 1
     @AppStorage("currentWeek_spanish") private var currentWeekSpanish: Int = 1
+    @AppStorage("lastRandomWeek_french") private var lastRandomWeekFrench: Int = 0
+    @AppStorage("lastRandomWeek_spanish") private var lastRandomWeekSpanish: Int = 0
 
     private var currentWeek: Int {
         get { language == .french ? currentWeekFrench : currentWeekSpanish }
         nonmutating set {
             if language == .french { currentWeekFrench = newValue }
             else { currentWeekSpanish = newValue }
+        }
+    }
+
+    private var lastRandomWeek: Int {
+        get { language == .french ? lastRandomWeekFrench : lastRandomWeekSpanish }
+        nonmutating set {
+            if language == .french { lastRandomWeekFrench = newValue }
+            else { lastRandomWeekSpanish = newValue }
         }
     }
 
@@ -56,10 +67,11 @@ struct ExerciseHomeView: View {
         }
         .navigationBarTitleDisplayMode(.inline)
         .onAppear {
-            let allLessons = LessonsDataLoader.lessonItems(for: language)
+            let termCount = mainTermCount()
+            guard termCount > 0 else { return }
 
             currentWeek = WeekEngine(itemsPerWeek: itemsPerWeek)
-                .clampWeek(currentWeek, termCount: allLessons.count)
+                .clampWeek(currentWeek, termCount: termCount)
         }
     }
 
@@ -134,12 +146,18 @@ struct ExerciseHomeView: View {
     }
 
     private func startRandomStudy() {
-        let allLessons = LessonsDataLoader.lessonItems(for: language)
-        guard !allLessons.isEmpty else { return }
+        let termCount = mainTermCount()
+        guard termCount > 0 else { return }
 
         let engine = WeekEngine(itemsPerWeek: itemsPerWeek)
-        let totalWeeks = engine.totalWeeks(termCount: allLessons.count)
-        let randomWeek = Int.random(in: 1...totalWeeks)
+        let totalWeeks = engine.totalWeeks(termCount: termCount)
+
+        let candidateWeeks = (1...totalWeeks).filter { week in
+            totalWeeks == 1 || week != lastRandomWeek
+        }
+
+        guard let randomWeek = candidateWeeks.randomElement() else { return }
+        lastRandomWeek = randomWeek
 
         let exerciseRoutes: [AppRoute] = [
             .listenMatch(language, week: randomWeek),
@@ -152,7 +170,37 @@ struct ExerciseHomeView: View {
         ]
 
         guard let randomExercise = exerciseRoutes.randomElement() else { return }
+
+        print("🎲 Random study: \(language.rawValue), week \(randomWeek) of \(totalWeeks), \(randomExercise)")
         path.append(randomExercise)
+    }
+
+    private func mainTermCount() -> Int {
+        let resourceName = language == .french ? "french_terms" : "spanish_terms"
+
+        guard let url =
+                Bundle.main.url(forResource: resourceName, withExtension: "json") ??
+                Bundle.main.url(forResource: resourceName, withExtension: "JSON")
+        else {
+            print("❌ Missing \(resourceName).json in bundle")
+            return 0
+        }
+
+        do {
+            let rawData = try Data(contentsOf: url)
+            let cleanedString = String(decoding: rawData, as: UTF8.self)
+
+            guard let cleanedData = cleanedString.data(using: .utf8),
+                  let entries = try JSONSerialization.jsonObject(with: cleanedData) as? [[String: Any]]
+            else {
+                return 0
+            }
+
+            return entries.count
+        } catch {
+            print("❌ Couldn't count terms in \(resourceName).json:", error)
+            return 0
+        }
     }
 
     private func handleTap(title: String) {

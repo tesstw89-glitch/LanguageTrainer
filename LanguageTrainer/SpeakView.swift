@@ -166,12 +166,19 @@ struct SpeakView: View {
             .padding(.horizontal, 18)
             .padding(.top, 10)
 
-            Text(current?.english ?? "")
-                .font(.system(size: 20, weight: .bold, design: .rounded))
-                .multilineTextAlignment(.center)
-                .minimumScaleFactor(0.72)
-                .lineLimit(4)
-                .padding(.horizontal, 18)
+            HStack(alignment: .top, spacing: 10) {
+                Text(current?.english ?? "")
+                    .font(.system(size: 20, weight: .bold, design: .rounded))
+                    .multilineTextAlignment(.center)
+                    .minimumScaleFactor(0.72)
+                    .lineLimit(4)
+                    .frame(maxWidth: .infinity)
+
+                if let current {
+                    ContextHelpButton(context: current.context)
+                }
+            }
+            .padding(.horizontal, 18)
 
             sentenceView
                 .padding(.horizontal, 18)

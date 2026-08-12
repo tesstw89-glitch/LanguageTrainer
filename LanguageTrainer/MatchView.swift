@@ -27,6 +27,9 @@ struct MatchView: View {
     @State private var selectedLeft: UUID? = nil
     @State private var selectedRight: UUID? = nil
 
+    // ✅ Smooth fade/shrink when matched
+    @State private var dissolvingIDs: Set<UUID> = []
+
     @State private var magnify: MagnifyPayload? = nil
 
     @State private var secondsLeft: Int = 120
@@ -87,7 +90,10 @@ struct MatchView: View {
 
     private var backgroundView: some View {
         LinearGradient(
-            colors: [Color(.systemBackground), Color(.systemBackground).opacity(0.92)],
+            colors: [
+                Color(.systemBackground),
+                Color(.systemBackground).opacity(0.92)
+            ],
             startPoint: .top,
             endPoint: .bottom
         )
@@ -181,10 +187,15 @@ struct MatchView: View {
 
             StarButton(id: term.id)
         }
+        .opacity(dissolvingIDs.contains(id) ? 0 : 1)
+        .scaleEffect(dissolvingIDs.contains(id) ? 0.92 : 1)
+        .animation(.easeInOut(duration: 0.22), value: dissolvingIDs)
         .contentShape(Rectangle())
         .highPriorityGesture(
             TapGesture(count: 2).onEnded {
                 guard !timeUp else { return }
+                guard dissolvingIDs.isEmpty else { return }
+
                 magnify = MagnifyPayload(
                     side: .left,
                     text: term.foreign,
@@ -195,6 +206,8 @@ struct MatchView: View {
         .simultaneousGesture(
             TapGesture().onEnded {
                 guard !timeUp else { return }
+                guard dissolvingIDs.isEmpty else { return }
+
                 handleLeftTap(term)
             }
         )
@@ -206,9 +219,14 @@ struct MatchView: View {
             text: term.english,
             isSelected: selectedRight == id
         )
+        .opacity(dissolvingIDs.contains(id) ? 0 : 1)
+        .scaleEffect(dissolvingIDs.contains(id) ? 0.92 : 1)
+        .animation(.easeInOut(duration: 0.22), value: dissolvingIDs)
         .highPriorityGesture(
             TapGesture(count: 2).onEnded {
                 guard !timeUp else { return }
+                guard dissolvingIDs.isEmpty else { return }
+
                 magnify = MagnifyPayload(
                     side: .right,
                     text: term.english,
@@ -219,12 +237,12 @@ struct MatchView: View {
         .simultaneousGesture(
             TapGesture().onEnded {
                 guard !timeUp else { return }
+                guard dissolvingIDs.isEmpty else { return }
+
                 handleRightTap(term)
             }
         )
     }
-
-    // MARK: - Eligibility
 
     // MARK: - Eligibility
 
@@ -273,6 +291,7 @@ struct MatchView: View {
         selectedLeft = nil
         selectedRight = nil
         magnify = nil
+        dissolvingIDs = []
     }
 
     private func reshuffleColumns() {
@@ -294,6 +313,7 @@ struct MatchView: View {
             selectedLeft = nil
             selectedRight = nil
             magnify = nil
+            dissolvingIDs = []
 
             onFinished?()
         }
@@ -319,8 +339,18 @@ struct MatchView: View {
         guard let l = selectedLeft, let r = selectedRight else { return }
 
         if l == r {
-            withAnimation(.easeInOut(duration: 0.18)) {
-                replaceMatched(id: l)
+            selectedLeft = nil
+            selectedRight = nil
+
+            withAnimation(.easeInOut(duration: 0.22)) {
+                dissolvingIDs.insert(l)
+            }
+
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.24) {
+                withAnimation(.easeInOut(duration: 0.18)) {
+                    replaceMatched(id: l)
+                    dissolvingIDs.remove(l)
+                }
             }
         } else {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
@@ -331,16 +361,22 @@ struct MatchView: View {
     }
 
     private func replaceMatched(id: UUID) {
+        // Remove only the matched pair
         visible.removeAll { $0.id == id }
         leftOrder.removeAll { $0 == id }
         rightOrder.removeAll { $0 == id }
 
+        // Add ONE new pair only, without reshuffling the existing ones
         if let next = deck.first {
             deck.removeFirst()
             visible.append(next)
-        }
 
-        reshuffleColumns()
+            let leftInsertIndex = Int.random(in: 0...leftOrder.count)
+            let rightInsertIndex = Int.random(in: 0...rightOrder.count)
+
+            leftOrder.insert(next.id, at: leftInsertIndex)
+            rightOrder.insert(next.id, at: rightInsertIndex)
+        }
 
         selectedLeft = nil
         selectedRight = nil

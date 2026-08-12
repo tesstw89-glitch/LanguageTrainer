@@ -6,7 +6,6 @@ struct DragFillView: View {
     let language: AppLanguage
     let terms: [TermPair]
 
-    // ✅ overrides for FullStudyFlow / Lessons
     let totalQsOverride: Int?
     let onFinished: (() -> Void)?
     let onCorrect: ((TermPair) -> Void)?
@@ -28,7 +27,10 @@ struct DragFillView: View {
     // MARK: - Defaults
 
     private var totalQs: Int { totalQsOverride ?? 20 }
+
     private let boxMinHeight: CGFloat = 54
+    private let dropAreaMaxHeight: CGFloat = 125
+    private let tokenBankHeight: CGFloat = 170
 
     private var isCurrentSingleWord: Bool {
         guard let current else { return false }
@@ -57,169 +59,303 @@ struct DragFillView: View {
     @State private var dropTokens: [TokenItem] = []
     @State private var isCorrect: Bool = false
 
+    // MARK: - Floating English overlay
+
+    @State private var showEnglishOverlay: Bool = false
+
     // MARK: - Drag state
 
     @State private var draggingToken: TokenItem? = nil
     @StateObject private var speaker = SpeechHelper()
-    @AppStorage("isSoundMuted") private var isSoundMuted: Bool = false
+
+    // Controls whether tapping a token speaks it
+    @AppStorage("dragFillTokenAudioOn") private var tokenAudioOn: Bool = true
 
     var body: some View {
-        VStack(spacing: 18) {
+        ZStack {
+            VStack(spacing: 18) {
 
-            // English prompt + audio + star
+                englishPromptSection
+
+                dropAreaSection
+
+                tokenBankSection
+
+                controlsSection
+
+                Spacer(minLength: 10)
+            }
+            .padding(.top, 10)
+
+            if showEnglishOverlay {
+                englishFloatingOverlay
+            }
+        }
+        .onAppear {
+            startQueue()
+        }
+        .onChange(of: dropTokens) { _, _ in
+            checkCorrect()
+        }
+    }
+
+    // MARK: - English Prompt Section
+
+    private var englishPromptSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+
             HStack(alignment: .top, spacing: 10) {
-                VStack(alignment: .leading, spacing: 6) {
-                    Text(current?.english ?? "")
-                        .font(.system(size: 22, weight: .bold, design: .rounded))
-                        .multilineTextAlignment(.leading)
 
-                    if isCurrentSingleWord {
-                        Text(revealedForeignProgress())
-                            .font(.system(size: 20, weight: .semibold, design: .rounded))
-                            .foregroundStyle(Color.blue.opacity(0.85))
-                            .frame(maxWidth: .infinity, alignment: .leading)
+                Text(current?.english ?? "")
+                    .font(.system(size: 22, weight: .bold, design: .rounded))
+                    .multilineTextAlignment(.leading)
+                    .lineLimit(3)
+                    .truncationMode(.tail)
+                    .minimumScaleFactor(0.75)
+                    .allowsTightening(true)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .layoutPriority(1)
+                    .contentShape(Rectangle())
+                    .onTapGesture(count: 2) {
+                        guard !(current?.english ?? "").isEmpty else { return }
+
+                        withAnimation(.easeInOut(duration: 0.18)) {
+                            showEnglishOverlay = true
+                        }
                     }
-                }
-
-                Spacer()
 
                 HStack(spacing: 10) {
-                    Button {
-                        if isSoundMuted {
-                            isSoundMuted = false
-                        }
 
+                    Button {
                         playCurrentForeign()
                     } label: {
-                        Image(systemName: isSoundMuted ? "speaker.slash.fill" : "speaker.wave.2.fill")
+                        Image(systemName: "play.fill")
                             .font(.system(size: 18, weight: .bold))
-                            .foregroundStyle(isSoundMuted ? .red : .blue)
+                            .foregroundStyle(.blue)
                             .padding(10)
                             .background(Color.white.opacity(0.95))
                             .clipShape(Circle())
                             .overlay(
                                 Circle()
-                                    .stroke((isSoundMuted ? Color.red : Color.blue).opacity(0.25), lineWidth: 1)
+                                    .stroke(Color.blue.opacity(0.25), lineWidth: 1)
                             )
                     }
                     .buttonStyle(.plain)
+                    .accessibilityLabel("Play full sentence")
+
+                    Button {
+                        tokenAudioOn.toggle()
+                    } label: {
+                        Image(systemName: tokenAudioOn ? "speaker.wave.2.fill" : "speaker.slash.fill")
+                            .font(.system(size: 18, weight: .bold))
+                            .foregroundStyle(tokenAudioOn ? .green : .red)
+                            .padding(10)
+                            .background(Color.white.opacity(0.95))
+                            .clipShape(Circle())
+                            .overlay(
+                                Circle()
+                                    .stroke((tokenAudioOn ? Color.green : Color.red).opacity(0.25), lineWidth: 1)
+                            )
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(tokenAudioOn ? "Turn token audio off" : "Turn token audio on")
 
                     if let current {
                         StarButton(id: current.id)
                     }
                 }
+                .fixedSize(horizontal: true, vertical: true)
             }
-            .padding(.horizontal, 18)
-            .padding(.top, 10)
 
-            // DROP AREA
-            VStack(alignment: .leading, spacing: 10) {
-                Text("Drop Area")
-                    .font(.system(size: 16, weight: .semibold, design: .rounded))
-                    .foregroundStyle(.secondary)
+            if isCurrentSingleWord {
+                Text(revealedForeignProgress())
+                    .font(.system(size: 20, weight: .semibold, design: .rounded))
+                    .foregroundStyle(Color.blue.opacity(0.85))
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+        .padding(.horizontal, 18)
+        .padding(.top, 10)
+    }
 
+    // MARK: - Drop Area
+
+    private var dropAreaSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Drop Area")
+                .font(.system(size: 16, weight: .semibold, design: .rounded))
+                .foregroundStyle(.secondary)
+
+            ScrollView(.vertical, showsIndicators: true) {
                 Wrap(words: dropTokens) { token in
                     dropTokenView(token)
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .frame(minHeight: boxMinHeight, alignment: .topLeading)
+                .frame(maxWidth: .infinity, alignment: .topLeading)
                 .padding(12)
-                .background(Color.white.opacity(0.92))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 16, style: .continuous)
-                        .stroke(
-                            Color.gray.opacity(0.45),
-                            style: StrokeStyle(lineWidth: 2, dash: [6, 6])
-                        )
-                )
-                .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-                .onDrop(
-                    of: [UTType.plainText],
-                    delegate: DropAtEndDelegate(
-                        dropTokens: $dropTokens,
-                        bankTokens: $bankTokens,
-                        draggingToken: $draggingToken,
-                        onChanged: checkCorrect
-                    )
-                )
             }
-            .padding(.horizontal, 18)
+            .frame(maxWidth: .infinity)
+            .frame(minHeight: boxMinHeight, maxHeight: dropAreaMaxHeight, alignment: .topLeading)
+            .background(Color.white.opacity(0.92))
+            .overlay(
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .stroke(
+                        Color.gray.opacity(0.45),
+                        style: StrokeStyle(lineWidth: 2, dash: [6, 6])
+                    )
+            )
+            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .contentShape(Rectangle())
+            .onDrop(
+                of: [UTType.plainText],
+                delegate: DropAtEndDelegate(
+                    dropTokens: $dropTokens,
+                    bankTokens: $bankTokens,
+                    draggingToken: $draggingToken,
+                    onChanged: checkCorrect
+                )
+            )
+        }
+        .padding(.horizontal, 18)
+    }
 
-            // WORD / LETTER BANK
-            VStack(alignment: .leading, spacing: 10) {
-                Text(isCurrentSingleWord ? "Letters" : "Tokens")
-                    .font(.system(size: 16, weight: .semibold, design: .rounded))
-                    .foregroundStyle(.secondary)
+    // MARK: - Token Bank
 
+    private var tokenBankSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text(isCurrentSingleWord ? "Letters" : "Tokens")
+                .font(.system(size: 16, weight: .semibold, design: .rounded))
+                .foregroundStyle(.secondary)
+
+            ScrollView(.vertical, showsIndicators: true) {
                 Wrap(words: bankTokens) { token in
                     tokenView(token, inDrop: false)
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .frame(minHeight: boxMinHeight, alignment: .topLeading)
+                .frame(maxWidth: .infinity, alignment: .topLeading)
                 .padding(12)
-                .background(Color.white.opacity(0.92))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 16, style: .continuous)
-                        .stroke(Color.blue.opacity(0.55), lineWidth: 2)
+            }
+            .frame(maxWidth: .infinity)
+            .frame(height: tokenBankHeight, alignment: .topLeading)
+            .background(Color.white.opacity(0.92))
+            .overlay(
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .stroke(Color.blue.opacity(0.55), lineWidth: 2)
+            )
+            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .contentShape(Rectangle())
+            .onDrop(
+                of: [UTType.plainText],
+                delegate: BankDropDelegate(
+                    bankTokens: $bankTokens,
+                    dropTokens: $dropTokens,
+                    draggingToken: $draggingToken,
+                    onChanged: checkCorrect
                 )
-                .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-                .onDrop(
-                    of: [UTType.plainText],
-                    delegate: BankDropDelegate(
-                        bankTokens: $bankTokens,
-                        dropTokens: $dropTokens,
-                        draggingToken: $draggingToken,
-                        onChanged: checkCorrect
+            )
+        }
+        .padding(.horizontal, 18)
+    }
+
+    // MARK: - Controls
+
+    private var controlsSection: some View {
+        HStack(spacing: 12) {
+            Button {
+                resetTokens()
+            } label: {
+                Text("Reset")
+                    .font(.system(size: 16, weight: .bold, design: .rounded))
+                    .foregroundColor(.black)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 12)
+                    .background(Color.white.opacity(0.95))
+                    .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 14, style: .continuous)
+                            .stroke(Color.gray.opacity(0.35), lineWidth: 1)
                     )
-                )
             }
-            .padding(.horizontal, 18)
+            .buttonStyle(.plain)
 
-            // CONTROLS
-            HStack(spacing: 12) {
-                Button {
-                    resetTokens()
-                } label: {
-                    Text("Reset")
-                        .font(.system(size: 16, weight: .bold, design: .rounded))
-                        .foregroundColor(.black)
-                        .padding(.horizontal, 16)
-                        .padding(.vertical, 12)
-                        .background(Color.white.opacity(0.95))
-                        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                                .stroke(Color.gray.opacity(0.35), lineWidth: 1)
-                        )
-                }
-                .buttonStyle(.plain)
-
-                Spacer()
-
-                Button {
-                    goNext()
-                } label: {
-                    Text(index >= queue.count - 1 ? "Finish" : "Next")
-                        .font(.system(size: 16, weight: .bold, design: .rounded))
-                        .foregroundColor(.white)
-                        .padding(.horizontal, 18)
-                        .padding(.vertical, 12)
-                        .background(isCorrect ? Color.green.opacity(0.9) : Color.gray.opacity(0.45))
-                        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-                }
-                .buttonStyle(.plain)
-                .disabled(!isCorrect)
+            Button {
+                giveClue()
+            } label: {
+                Text("Clue")
+                    .font(.system(size: 16, weight: .bold, design: .rounded))
+                    .foregroundColor(.white)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 12)
+                    .background(canGiveClue ? Color.blue.opacity(0.85) : Color.gray.opacity(0.45))
+                    .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
             }
-            .padding(.horizontal, 18)
-            .padding(.top, 4)
+            .buttonStyle(.plain)
+            .disabled(!canGiveClue)
 
-            Spacer(minLength: 10)
+            Spacer()
+
+            Button {
+                goNext()
+            } label: {
+                Text(index >= queue.count - 1 ? "Finish" : "Next")
+                    .font(.system(size: 16, weight: .bold, design: .rounded))
+                    .foregroundColor(.white)
+                    .padding(.horizontal, 18)
+                    .padding(.vertical, 12)
+                    .background(isCorrect ? Color.green.opacity(0.9) : Color.gray.opacity(0.45))
+                    .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+            }
+            .buttonStyle(.plain)
+            .disabled(!isCorrect)
         }
-        .padding(.top, 10)
-        .onAppear { startQueue() }
-        .onChange(of: dropTokens) { _, _ in
-            checkCorrect()
+        .padding(.horizontal, 18)
+        .padding(.top, 4)
+    }
+
+    private var canGiveClue: Bool {
+        guard current != nil else { return false }
+        guard !isCorrect else { return false }
+
+        let targetTexts = targetTokenTexts()
+        let prefixCount = correctPrefixCount(targetTexts: targetTexts)
+
+        return prefixCount < targetTexts.count
+    }
+
+    // MARK: - Floating English Overlay
+
+    private var englishFloatingOverlay: some View {
+        VStack {
+            Spacer()
+
+            ScrollView(.vertical, showsIndicators: true) {
+                Text(current?.english ?? "")
+                    .font(.system(size: 24, weight: .bold, design: .rounded))
+                    .foregroundStyle(.black)
+                    .multilineTextAlignment(.leading)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(20)
+            }
+            .frame(maxWidth: .infinity)
+            .frame(maxHeight: 280)
+            .background(Color.white.opacity(0.98))
+            .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 22, style: .continuous)
+                    .stroke(Color.gray.opacity(0.25), lineWidth: 1)
+            )
+            .shadow(color: Color.black.opacity(0.2), radius: 18, y: 8)
+            .padding(.horizontal, 22)
+            .onTapGesture {
+                withAnimation(.easeInOut(duration: 0.18)) {
+                    showEnglishOverlay = false
+                }
+            }
+
+            Spacer()
         }
+        .zIndex(50)
+        .transition(.opacity.combined(with: .scale(scale: 0.96)))
     }
 
     // MARK: - Eligibility
@@ -241,6 +377,7 @@ struct DragFillView: View {
             dropTokens = []
             draggingToken = nil
             isCorrect = false
+            showEnglishOverlay = false
             return
         }
 
@@ -254,6 +391,7 @@ struct DragFillView: View {
         bankTokens = []
         dropTokens = []
         draggingToken = nil
+        showEnglishOverlay = false
 
         guard index < queue.count else {
             onFinished?()
@@ -276,6 +414,7 @@ struct DragFillView: View {
         }
 
         let nextIndex = index + 1
+
         if nextIndex >= queue.count {
             onFinished?()
         } else {
@@ -301,18 +440,23 @@ struct DragFillView: View {
     }
 
     private func tokenView(_ token: TokenItem, inDrop: Bool) -> some View {
-        Text(token.text)
+        let isWrongInDrop = inDrop && !isTokenCorrectInDropPosition(token)
+
+        return Text(token.text)
             .font(.system(size: 16, weight: .semibold, design: .rounded))
             .foregroundColor(.black)
             .padding(.horizontal, 12)
             .padding(.vertical, 9)
             .background(
                 RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .fill(Color.white)
+                    .fill(isWrongInDrop ? Color.red.opacity(0.25) : Color.white)
             )
             .overlay(
                 RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .stroke(Color.gray.opacity(0.18), lineWidth: 1)
+                    .stroke(
+                        isWrongInDrop ? Color.red.opacity(0.75) : Color.gray.opacity(0.18),
+                        lineWidth: isWrongInDrop ? 2 : 1
+                    )
             )
             .shadow(
                 color: Color.black.opacity(0.12),
@@ -321,6 +465,10 @@ struct DragFillView: View {
             )
             .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
             .onTapGesture {
+                if tokenAudioOn {
+                    playToken(token)
+                }
+
                 moveToken(token, toDrop: !inDrop)
             }
             .onDrag {
@@ -336,6 +484,20 @@ struct DragFillView: View {
                     .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                     .shadow(color: Color.black.opacity(0.18), radius: 8, y: 4)
             }
+    }
+
+    private func isTokenCorrectInDropPosition(_ token: TokenItem) -> Bool {
+        guard let dropIndex = dropTokens.firstIndex(where: { $0.id == token.id }) else {
+            return true
+        }
+
+        let targetTexts = targetTokenTexts()
+
+        guard dropIndex < targetTexts.count else {
+            return false
+        }
+
+        return token.text == targetTexts[dropIndex]
     }
 
     // MARK: - Movement
@@ -382,6 +544,81 @@ struct DragFillView: View {
         return nil
     }
 
+    // MARK: - Clue
+
+    private func giveClue() {
+        let targetTexts = targetTokenTexts()
+        guard !targetTexts.isEmpty else { return }
+
+        let prefixCount = correctPrefixCount(targetTexts: targetTexts)
+
+        guard prefixCount < targetTexts.count else {
+            checkCorrect()
+            return
+        }
+
+        let neededText = targetTexts[prefixCount]
+
+        var clueToken: TokenItem?
+
+        // First choice: take the next correct token from the bank.
+        if let bankIndex = bankTokens.firstIndex(where: { $0.text == neededText }) {
+            clueToken = bankTokens.remove(at: bankIndex)
+        }
+
+        // If the correct token is already later in the drop area, move it into the right place.
+        if clueToken == nil,
+           let laterDropIndex = dropTokens.indices.first(where: {
+               $0 >= prefixCount && dropTokens[$0].text == neededText
+           }) {
+            clueToken = dropTokens.remove(at: laterDropIndex)
+        }
+
+        // Fallback for repeated words or letters.
+        if clueToken == nil,
+           let anyDropIndex = dropTokens.firstIndex(where: { $0.text == neededText }) {
+            clueToken = dropTokens.remove(at: anyDropIndex)
+        }
+
+        guard let clueToken else { return }
+
+        let insertIndex = min(prefixCount, dropTokens.count)
+
+        withAnimation(.easeInOut(duration: 0.16)) {
+            dropTokens.insert(clueToken, at: insertIndex)
+        }
+
+        draggingToken = nil
+        checkCorrect()
+    }
+
+    private func targetTokenTexts() -> [String] {
+        guard let current else { return [] }
+
+        let cleaned = cleanForeignForDrag(current.foreign)
+        let words = splitWords(cleaned)
+
+        if words.count == 1, let word = words.first {
+            return splitLetters(word)
+        } else {
+            return words
+        }
+    }
+
+    private func correctPrefixCount(targetTexts: [String]) -> Int {
+        var count = 0
+
+        for i in 0..<min(dropTokens.count, targetTexts.count) {
+            if dropTokens[i].text == targetTexts[i] {
+                count += 1
+            } else {
+                break
+            }
+        }
+
+        return count
+    }
+
     // MARK: - Checking
 
     private func checkCorrect() {
@@ -406,6 +643,7 @@ struct DragFillView: View {
         dropTokens = []
         draggingToken = nil
         isCorrect = false
+        showEnglishOverlay = false
     }
 
     // MARK: - Audio
@@ -415,6 +653,19 @@ struct DragFillView: View {
 
         let cleaned = cleanForeignForDrag(current.foreign)
         speaker.speak(cleaned, languageCode: speechCode)
+    }
+
+    private func playToken(_ token: TokenItem) {
+        let cleaned = cleanTokenForSpeech(token.text)
+        guard !cleaned.isEmpty else { return }
+
+        speaker.speak(cleaned, languageCode: speechCode)
+    }
+
+    private func cleanTokenForSpeech(_ s: String) -> String {
+        s.replacingOccurrences(of: "’", with: "'")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .trimmingCharacters(in: CharacterSet(charactersIn: ".,!?;:()[]{}\"“”«»…"))
     }
 
     // MARK: - Helpers
@@ -477,15 +728,56 @@ struct DragFillView: View {
 
         out = out.replacingOccurrences(of: "’", with: "'")
         out = out.trimmingCharacters(in: .whitespacesAndNewlines)
-        out = out.replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
+
+        // Normalise repeated spacing first.
+        out = out.replacingOccurrences(
+            of: "\\s+",
+            with: " ",
+            options: .regularExpression
+        )
+
+        // Attach punctuation to the word before it.
+        // Example: "Tu viens ?" becomes "Tu viens?"
+        // Example: "Oui ! Bien sûr ." becomes "Oui! Bien sûr."
+        out = out.replacingOccurrences(
+            of: "\\s+([.,!?;:…])",
+            with: "$1",
+            options: .regularExpression
+        )
+
+        // Attach closing quotation/bracket marks to the word before them.
+        out = out.replacingOccurrences(
+            of: "\\s+([»”\\)])",
+            with: "$1",
+            options: .regularExpression
+        )
 
         return out
     }
 
     private func normalize(_ s: String) -> String {
-        s.replacingOccurrences(of: "’", with: "'")
+        var out = s.replacingOccurrences(of: "’", with: "'")
             .trimmingCharacters(in: .whitespacesAndNewlines)
-            .replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
+
+        out = out.replacingOccurrences(
+            of: "\\s+",
+            with: " ",
+            options: .regularExpression
+        )
+
+        out = out.replacingOccurrences(
+            of: "\\s+([.,!?;:…])",
+            with: "$1",
+            options: .regularExpression
+        )
+
+        out = out.replacingOccurrences(
+            of: "\\s+([»”\\)])",
+            with: "$1",
+            options: .regularExpression
+        )
+
+        return out
     }
 
     private func splitWords(_ phrase: String) -> [String] {
@@ -590,6 +882,7 @@ private struct BankDropDelegate: DropDelegate {
 
         withAnimation(.easeInOut(duration: 0.12)) {
             dropTokens.removeAll { $0.id == dragged.id }
+
             if !bankTokens.contains(where: { $0.id == dragged.id }) {
                 bankTokens.append(dragged)
             }

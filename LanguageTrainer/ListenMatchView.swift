@@ -20,7 +20,9 @@ struct ListenMatchView: View {
     @State private var selectedLeft: UUID? = nil
     @State private var selectedRight: UUID? = nil
 
-    // Overlay magnify for English only
+    // ✅ For nice fade/shrink when a pair is matched
+    @State private var dissolvingIDs: Set<UUID> = []
+
     struct MagnifyPayload: Identifiable, Equatable {
         let id = UUID()
         let text: String
@@ -29,7 +31,6 @@ struct ListenMatchView: View {
 
     @State private var magnify: MagnifyPayload? = nil
 
-    // Timer
     @State private var secondsLeft: Int = 120
     @State private var timeUp: Bool = false
 
@@ -73,11 +74,14 @@ struct ListenMatchView: View {
         .animation(.easeInOut(duration: 0.18), value: magnify != nil)
     }
 
-    // MARK: - Main subviews
+    // MARK: - Main views
 
     private var backgroundView: some View {
         LinearGradient(
-            colors: [Color(.systemBackground), Color(.systemBackground).opacity(0.92)],
+            colors: [
+                Color(.systemBackground),
+                Color(.systemBackground).opacity(0.92)
+            ],
             startPoint: .top,
             endPoint: .bottom
         )
@@ -128,9 +132,13 @@ struct ListenMatchView: View {
                 ForEach(leftOrder, id: \.self) { id in
                     if let term = visible.first(where: { $0.id == id }) {
                         ListenToken(isSelected: selectedLeft == id)
+                            .opacity(dissolvingIDs.contains(id) ? 0 : 1)
+                            .scaleEffect(dissolvingIDs.contains(id) ? 0.92 : 1)
+                            .animation(.easeInOut(duration: 0.22), value: dissolvingIDs)
                             .simultaneousGesture(
                                 TapGesture().onEnded {
                                     guard !timeUp else { return }
+                                    guard dissolvingIDs.isEmpty else { return }
                                     handleLeftTap(term)
                                 }
                             )
@@ -150,9 +158,13 @@ struct ListenMatchView: View {
                             text: term.english,
                             isSelected: selectedRight == id
                         )
+                        .opacity(dissolvingIDs.contains(id) ? 0 : 1)
+                        .scaleEffect(dissolvingIDs.contains(id) ? 0.92 : 1)
+                        .animation(.easeInOut(duration: 0.22), value: dissolvingIDs)
                         .highPriorityGesture(
                             TapGesture(count: 2).onEnded {
                                 guard !timeUp else { return }
+                                guard dissolvingIDs.isEmpty else { return }
 
                                 magnify = MagnifyPayload(
                                     text: term.english,
@@ -163,6 +175,7 @@ struct ListenMatchView: View {
                         .simultaneousGesture(
                             TapGesture().onEnded {
                                 guard !timeUp else { return }
+                                guard dissolvingIDs.isEmpty else { return }
                                 handleRightTap(term)
                             }
                         )
@@ -175,10 +188,8 @@ struct ListenMatchView: View {
 
     // MARK: - Eligibility
 
-    // MARK: - Eligibility
-
     private var eligibleTerms: [TermPair] {
-        return dedupedTerms(allTerms)
+        dedupedTerms(allTerms)
             .filter { !$0.foreign.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
             .filter { !$0.english.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
             .filter { wordCount($0.foreign) <= 7 }
@@ -222,6 +233,7 @@ struct ListenMatchView: View {
         selectedLeft = nil
         selectedRight = nil
         magnify = nil
+        dissolvingIDs = []
     }
 
     private func reshuffleColumns() {
@@ -243,6 +255,7 @@ struct ListenMatchView: View {
             selectedLeft = nil
             selectedRight = nil
             magnify = nil
+            dissolvingIDs = []
         }
     }
 
@@ -264,8 +277,18 @@ struct ListenMatchView: View {
         guard let l = selectedLeft, let r = selectedRight else { return }
 
         if l == r {
-            withAnimation(.easeInOut(duration: 0.18)) {
-                replaceMatched(id: l)
+            selectedLeft = nil
+            selectedRight = nil
+
+            withAnimation(.easeInOut(duration: 0.22)) {
+                dissolvingIDs.insert(l)
+            }
+
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.24) {
+                withAnimation(.easeInOut(duration: 0.18)) {
+                    replaceMatched(id: l)
+                    dissolvingIDs.remove(l)
+                }
             }
         } else {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
@@ -276,16 +299,22 @@ struct ListenMatchView: View {
     }
 
     private func replaceMatched(id: UUID) {
+        // Remove only the matched pair
         visible.removeAll { $0.id == id }
         leftOrder.removeAll { $0 == id }
         rightOrder.removeAll { $0 == id }
 
+        // Add only ONE new pair, without reshuffling existing cards
         if let next = deck.first {
             deck.removeFirst()
             visible.append(next)
-        }
 
-        reshuffleColumns()
+            let leftInsertIndex = Int.random(in: 0...leftOrder.count)
+            let rightInsertIndex = Int.random(in: 0...rightOrder.count)
+
+            leftOrder.insert(next.id, at: leftInsertIndex)
+            rightOrder.insert(next.id, at: rightInsertIndex)
+        }
 
         selectedLeft = nil
         selectedRight = nil
@@ -299,7 +328,7 @@ struct ListenMatchView: View {
     }
 }
 
-// MARK: - Left token: rounded square audio-only
+// MARK: - Left token: audio-only
 
 private struct ListenToken: View {
     let isSelected: Bool

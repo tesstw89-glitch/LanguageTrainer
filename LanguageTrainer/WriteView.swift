@@ -48,6 +48,20 @@ struct WriteView: View {
         }
     }
 
+    private var canGoNext: Bool {
+        isCorrect || hasRevealedAnswer
+    }
+
+    private var answerBorderColor: Color {
+        if isCorrect {
+            return .green
+        } else if hasRevealedAnswer {
+            return .blue.opacity(0.75)
+        } else {
+            return .black.opacity(0.15)
+        }
+    }
+
     @State private var queue: [TermPair] = []
     @State private var index: Int = 0
     @State private var current: TermPair? = nil
@@ -55,6 +69,7 @@ struct WriteView: View {
     @State private var typed: String = ""
     @State private var isCorrect: Bool = false
     @State private var hasReportedCorrect: Bool = false
+    @State private var hasRevealedAnswer: Bool = false
 
     @FocusState private var isFocused: Bool
 
@@ -66,6 +81,7 @@ struct WriteView: View {
                 topBar
                 promptView
                 answerBox
+                dontKnowButton
                 correctAnswerView
                 nextButton
 
@@ -158,7 +174,7 @@ struct WriteView: View {
             .background(Color.white.opacity(0.92))
             .overlay(
                 RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .stroke(isCorrect ? Color.green : Color.black.opacity(0.15), lineWidth: 2)
+                    .stroke(answerBorderColor, lineWidth: 2)
             )
             .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
             .shadow(color: Color.black.opacity(0.10), radius: 6, y: 3)
@@ -173,13 +189,47 @@ struct WriteView: View {
     }
 
     @ViewBuilder
+    private var dontKnowButton: some View {
+        if !isCorrect && !hasRevealedAnswer, current != nil {
+            HStack {
+                Button {
+                    revealAnswer()
+                } label: {
+                    HStack(spacing: 7) {
+                        Image(systemName: "questionmark.circle.fill")
+                        Text("I don’t know")
+                    }
+                    .font(.system(size: 15, weight: .bold, design: .rounded))
+                    .foregroundColor(.white)
+                    .padding(.horizontal, 13)
+                    .padding(.vertical, 10)
+                    .background(Color.orange.opacity(0.90))
+                    .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                }
+                .buttonStyle(.plain)
+
+                Spacer()
+            }
+            .padding(.horizontal, 18)
+        }
+    }
+
+    @ViewBuilder
     private var correctAnswerView: some View {
-        if isCorrect, let current {
-            Text(cleanForWrite(current.foreign))
-                .font(.system(size: 16, weight: .semibold, design: .rounded))
-                .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
-                .padding(.horizontal, 18)
+        if (isCorrect || hasRevealedAnswer), let current {
+            VStack(spacing: 6) {
+                if hasRevealedAnswer && !isCorrect {
+                    Text("Answer")
+                        .font(.system(size: 13, weight: .bold, design: .rounded))
+                        .foregroundStyle(.secondary)
+                }
+
+                Text(cleanForWrite(current.foreign))
+                    .font(.system(size: 17, weight: .semibold, design: .rounded))
+                    .foregroundStyle(hasRevealedAnswer && !isCorrect ? .primary : .secondary)
+                    .multilineTextAlignment(.center)
+            }
+            .padding(.horizontal, 18)
         }
     }
 
@@ -200,8 +250,8 @@ struct WriteView: View {
         }
         .buttonStyle(.plain)
         .padding(.horizontal, 18)
-        .opacity(isCorrect ? 1 : 0)
-        .allowsHitTesting(isCorrect)
+        .opacity(canGoNext ? 1 : 0)
+        .allowsHitTesting(canGoNext)
     }
 
     // MARK: - Queue
@@ -216,6 +266,7 @@ struct WriteView: View {
             typed = ""
             isCorrect = false
             hasReportedCorrect = false
+            hasRevealedAnswer = false
             return
         }
 
@@ -233,6 +284,7 @@ struct WriteView: View {
     private func loadCurrent() {
         isCorrect = false
         hasReportedCorrect = false
+        hasRevealedAnswer = false
         typed = ""
 
         guard index < queue.count else {
@@ -249,7 +301,7 @@ struct WriteView: View {
     }
 
     private func next() {
-        guard isCorrect else { return }
+        guard canGoNext else { return }
 
         UIImpactFeedbackGenerator(style: .medium).impactOccurred()
 
@@ -267,6 +319,21 @@ struct WriteView: View {
         }
     }
 
+    // MARK: - Reveal Answer
+
+    private func revealAnswer() {
+        guard let current else { return }
+
+        hasRevealedAnswer = true
+        hasReportedCorrect = true
+
+        starStore.set(current.id, starred: true)
+
+        isFocused = false
+
+        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+    }
+
     // MARK: - Checking
 
     private func checkAnswer() {
@@ -281,7 +348,7 @@ struct WriteView: View {
             UIImpactFeedbackGenerator(style: .light).impactOccurred()
         }
 
-        if ok && !hasReportedCorrect {
+        if ok && !hasReportedCorrect && !hasRevealedAnswer {
             hasReportedCorrect = true
             onCorrect?(current)
         }

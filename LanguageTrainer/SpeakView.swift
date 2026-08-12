@@ -17,6 +17,12 @@ struct SpeakView: View {
     private let passRatio: Double = 0.75
     private let graceSeconds: Double = 10
 
+    // ✅ Keeps SpeakView sentences manageable
+    private let minSpeakWords = 3
+    private let maxSpeakWords = 22
+    private let maxSpeakCharacters = 150
+    private let maxSentenceChunks = 2
+
     @State private var queue: [TermPair] = []
     @State private var index: Int = 0
     @State private var current: TermPair? = nil
@@ -30,7 +36,12 @@ struct SpeakView: View {
 
     // UI state
     @State private var mainButtonMode: MainButtonMode = .speak
-    enum MainButtonMode { case speak, keepGoing, next }
+
+    enum MainButtonMode {
+        case speak
+        case keepGoing
+        case next
+    }
 
     init(
         language: AppLanguage,
@@ -90,13 +101,26 @@ struct SpeakView: View {
 
     private var speechCode: String {
         switch language {
-        case .french:  return "fr-FR"
-        case .spanish: return "es-ES"
+        case .french:
+            return "fr-FR"
+        case .spanish:
+            return "es-ES"
         }
     }
 
+    // ✅ SpeakView uses sentence terms, but filters out the massive ones
     private var eligible: [TermPair] {
-        terms.filter { wordCount(cleanForSpeak($0.foreign)) >= 3 }
+        terms.filter { term in
+            let cleaned = cleanForSpeak(term.foreign)
+            let words = wordCount(cleaned)
+            let chunks = sentenceChunkCount(cleaned)
+
+            return !cleaned.isEmpty
+                && words >= minSpeakWords
+                && words <= maxSpeakWords
+                && cleaned.count <= maxSpeakCharacters
+                && chunks <= maxSentenceChunks
+        }
     }
 
     // MARK: - Body
@@ -111,7 +135,9 @@ struct SpeakView: View {
         }
         .onAppear {
             startQueue()
-            Task { _ = await stt.requestPermissions() }
+            Task {
+                _ = await stt.requestPermissions()
+            }
         }
         .onChange(of: stt.transcript) { _, newValue in
             handleTranscript(newValue)
@@ -143,6 +169,8 @@ struct SpeakView: View {
             Text(current?.english ?? "")
                 .font(.system(size: 20, weight: .bold, design: .rounded))
                 .multilineTextAlignment(.center)
+                .minimumScaleFactor(0.72)
+                .lineLimit(4)
                 .padding(.horizontal, 18)
 
             sentenceView
@@ -151,8 +179,9 @@ struct SpeakView: View {
             HStack(spacing: 12) {
                 Button {
                     prepareForPlayback()
-                    if let fr = current?.foreign {
-                        speaker.speak(fr, languageCode: speechCode)
+
+                    if let foreign = current?.foreign {
+                        speaker.speak(cleanForSpeak(foreign), languageCode: speechCode)
                     }
                 } label: {
                     Image(systemName: "speaker.wave.2.fill")
@@ -185,6 +214,7 @@ struct SpeakView: View {
                     if mainButtonMode == .speak {
                         Image(systemName: "mic.fill")
                     }
+
                     Text(mainTitle)
                 }
                 .font(.system(size: 18, weight: .bold, design: .rounded))
@@ -259,8 +289,15 @@ struct SpeakView: View {
         guard let msg = stt.errorMessage, !msg.isEmpty else { return false }
 
         let m = msg.lowercased()
-        if m.contains("cancelled") || m.contains("canceled") { return false }
-        if m.contains("no speech detected") { return false }
+
+        if m.contains("cancelled") || m.contains("canceled") {
+            return false
+        }
+
+        if m.contains("no speech detected") {
+            return false
+        }
+
         return true
     }
 
@@ -272,7 +309,9 @@ struct SpeakView: View {
     }
 
     private var sentenceView: some View {
-        let rawWords = (current?.foreign ?? "")
+        let cleanedSentence = cleanForSpeak(current?.foreign ?? "")
+
+        let rawWords = cleanedSentence
             .split(whereSeparator: { $0.isWhitespace })
             .map(String.init)
 
@@ -284,8 +323,10 @@ struct SpeakView: View {
             Wrap(words: tokens, spacing: 6, lineSpacing: 10) { token in
                 Button {
                     prepareForPlayback()
+
                     let spoken = tappableWordForSpeech(token.word)
                     guard !spoken.isEmpty else { return }
+
                     speaker.speak(spoken, languageCode: speechCode)
                 } label: {
                     SpeakInlineWord(
@@ -299,6 +340,7 @@ struct SpeakView: View {
             if graceActive, let deadline = graceDeadline {
                 TimelineView(.periodic(from: .now, by: 1)) { context in
                     let secondsLeft = max(0, Int(ceil(deadline.timeIntervalSince(context.date))))
+
                     Text("Keep going… \(secondsLeft)s")
                         .font(.system(size: 13, weight: .semibold, design: .rounded))
                         .foregroundStyle(.secondary)
@@ -320,9 +362,12 @@ struct SpeakView: View {
 
     private var mainButtonColor: Color {
         switch mainButtonMode {
-        case .speak:     return Color.green.opacity(0.90)
-        case .keepGoing: return Color.orange.opacity(0.90)
-        case .next:      return Color.green.opacity(0.90)
+        case .speak:
+            return Color.green.opacity(0.90)
+        case .keepGoing:
+            return Color.orange.opacity(0.90)
+        case .next:
+            return Color.green.opacity(0.90)
         }
     }
 
@@ -330,6 +375,7 @@ struct SpeakView: View {
 
     private func startQueue() {
         let pool = eligible
+
         guard !pool.isEmpty else {
             queue = []
             current = nil
@@ -358,8 +404,8 @@ struct SpeakView: View {
 
         current = queue[index]
 
-        if let fr = current?.foreign {
-            speaker.speak(fr, languageCode: speechCode)
+        if let foreign = current?.foreign {
+            speaker.speak(cleanForSpeak(foreign), languageCode: speechCode)
         }
     }
 
@@ -410,6 +456,7 @@ struct SpeakView: View {
 
         if graceActive {
             cancelGrace()
+
             if mainButtonMode != .next {
                 mainButtonMode = .speak
             }
@@ -422,23 +469,31 @@ struct SpeakView: View {
         guard let current else { return }
         guard mainButtonMode != .next else { return }
 
-        let canonicalTokens = SpeakNormalizer.sentenceCanonicalTokensAlignedToWords(cleanForSpeak(current.foreign))
+        let canonicalTokens = SpeakNormalizer.sentenceCanonicalTokensAlignedToWords(
+            cleanForSpeak(current.foreign)
+        )
+
         let heardSet = SpeakNormalizer.transcriptTokenSet(raw)
 
         var newRecognised = recognisedIndices
+
         for (i, tok) in canonicalTokens.enumerated() {
             if newRecognised.contains(i) { continue }
+
             if !tok.isEmpty, heardSet.contains(tok) {
                 newRecognised.insert(i)
             }
         }
+
         recognisedIndices = newRecognised
 
         let important = SpeakNormalizer.importantIndices(for: canonicalTokens)
         let importantTotal = important.count
         let importantRecognised = important.filter { recognisedIndices.contains($0) }.count
 
-        let ratio = importantTotal == 0 ? 0 : Double(importantRecognised) / Double(importantTotal)
+        let ratio = importantTotal == 0
+            ? 0
+            : Double(importantRecognised) / Double(importantTotal)
 
         if importantTotal > 0, importantRecognised == importantTotal {
             cancelGrace()
@@ -488,7 +543,7 @@ struct SpeakView: View {
         graceWorkItem = nil
     }
 
-    // MARK: - Cleaning
+    // MARK: - Cleaning / eligibility helpers
 
     private func tappableWordForSpeech(_ word: String) -> String {
         word
@@ -498,16 +553,41 @@ struct SpeakView: View {
 
     private func cleanForSpeak(_ s: String) -> String {
         var out = s
+
         while let start = out.firstIndex(of: "("),
               let end = out[start...].firstIndex(of: ")") {
             out.removeSubrange(start...end)
         }
-        return out
+
+        out = out
             .replacingOccurrences(of: "’", with: "'")
             .trimmingCharacters(in: .whitespacesAndNewlines)
+
+        out = out.replacingOccurrences(
+            of: "\\s+",
+            with: " ",
+            options: .regularExpression
+        )
+
+        return out
     }
 
     private func wordCount(_ s: String) -> Int {
-        s.split(whereSeparator: { $0.isWhitespace }).count
+        cleanForSpeak(s)
+            .split(whereSeparator: { $0.isWhitespace })
+            .count
+    }
+
+    private func sentenceChunkCount(_ s: String) -> Int {
+        let cleaned = cleanForSpeak(s)
+
+        guard !cleaned.isEmpty else {
+            return 0
+        }
+
+        let endings: Set<Character> = [".", "!", "?", "…"]
+        let count = cleaned.filter { endings.contains($0) }.count
+
+        return max(1, count)
     }
 }

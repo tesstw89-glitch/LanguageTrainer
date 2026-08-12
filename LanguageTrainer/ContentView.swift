@@ -245,6 +245,11 @@ private enum MainTermsDataLoader {
             return decoded.compactMap { raw in
                 let sentenceForeign = clean(raw.foreign)
                 let sentenceEnglish = clean(raw.english)
+                let sentenceContext: String? = {
+                    guard let rawContext = raw.context else { return nil }
+                    let cleanedContext = clean(rawContext)
+                    return cleanedContext.isEmpty ? nil : cleanedContext
+                }()
 
                 guard !sentenceForeign.isEmpty else { return nil }
                 guard !sentenceEnglish.isEmpty else { return nil }
@@ -279,7 +284,8 @@ private enum MainTermsDataLoader {
                     id: sentenceID,
                     foreign: sentenceForeign,
                     english: sentenceEnglish,
-                    lemmas: lemmaPairs
+                    lemmas: lemmaPairs,
+                    context: sentenceContext
                 )
             }
 
@@ -323,6 +329,7 @@ private enum MainTermsDataLoader {
         let foreign: String
         let english: String
         let lemmas: [RawTerm]
+        let context: String?
 
         private struct AnyKey: CodingKey {
             var stringValue: String
@@ -354,6 +361,11 @@ private enum MainTermsDataLoader {
                 from: container,
                 keys: ["lemmas", "Lemmas", "chunks", "Chunks"]
             )
+
+            context = try Self.decodeOptionalString(
+                from: container,
+                keys: ["context", "Context"]
+            )
         }
 
         private static func decodeString(
@@ -374,6 +386,20 @@ private enum MainTermsDataLoader {
                     debugDescription: "Missing keys \(keys)"
                 )
             )
+        }
+
+        private static func decodeOptionalString(
+            from container: KeyedDecodingContainer<AnyKey>,
+            keys: [String]
+        ) throws -> String? {
+            for keyName in keys {
+                if let key = AnyKey(stringValue: keyName),
+                   let value = try container.decodeIfPresent(String.self, forKey: key) {
+                    return value
+                }
+            }
+
+            return nil
         }
 
         private static func decodeTermsIfPresent(

@@ -52,6 +52,7 @@ struct ExerciseHomeView: View {
             background
             headerArea
             buttonsLayer
+            randomStudyButton
         }
         .navigationBarTitleDisplayMode(.inline)
         .onAppear {
@@ -84,6 +85,30 @@ struct ExerciseHomeView: View {
         }
     }
 
+    private var randomStudyButton: some View {
+        VStack {
+            HStack {
+                Spacer()
+
+                Button(action: startRandomStudy) {
+                    Image("dice")
+                        .resizable()
+                        .scaledToFit()
+                        .frame(width: 70, height: 70)
+                        .contentShape(Rectangle())
+                        .shadow(radius: 5, y: 3)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Random study")
+                .accessibilityHint("Chooses a random week and a random exercise")
+            }
+            .padding(.top, 42)
+            .padding(.trailing, 18)
+
+            Spacer()
+        }
+    }
+
     private var buttonsLayer: some View {
         GeometryReader { geo in
             let topAnchor = CGPoint(x: geo.size.width / 2, y: 290)
@@ -106,6 +131,28 @@ struct ExerciseHomeView: View {
                 .position(x: anchor.x + item.x, y: anchor.y + item.y)
             }
         }
+    }
+
+    private func startRandomStudy() {
+        let allLessons = LessonsDataLoader.lessonItems(for: language)
+        guard !allLessons.isEmpty else { return }
+
+        let engine = WeekEngine(itemsPerWeek: itemsPerWeek)
+        let totalWeeks = engine.totalWeeks(termCount: allLessons.count)
+        let randomWeek = Int.random(in: 1...totalWeeks)
+
+        let exerciseRoutes: [AppRoute] = [
+            .listenMatch(language, week: randomWeek),
+            .match(language, week: randomWeek),
+            .dragAndFill(language, week: randomWeek),
+            .write(language, week: randomWeek),
+            .speak(language, week: randomWeek),
+            .matchWrite(language, week: randomWeek),
+            .listenWrite(language, week: randomWeek)
+        ]
+
+        guard let randomExercise = exerciseRoutes.randomElement() else { return }
+        path.append(randomExercise)
     }
 
     private func handleTap(title: String) {

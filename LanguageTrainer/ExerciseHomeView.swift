@@ -10,6 +10,8 @@ struct ExerciseHomeView: View {
     @AppStorage("lastRandomWeek_french") private var lastRandomWeekFrench: Int = 0
     @AppStorage("lastRandomWeek_spanish") private var lastRandomWeekSpanish: Int = 0
 
+    @State private var pendingExerciseTitle: String? = nil
+
     private var currentWeek: Int {
         get { language == .french ? currentWeekFrench : currentWeekSpanish }
         nonmutating set {
@@ -64,6 +66,10 @@ struct ExerciseHomeView: View {
             headerArea
             buttonsLayer
             randomStudyButton
+
+            if let pendingExerciseTitle {
+                weekChoiceOverlay(for: pendingExerciseTitle)
+            }
         }
         .navigationBarTitleDisplayMode(.inline)
         .onAppear {
@@ -127,17 +133,27 @@ struct ExerciseHomeView: View {
             let bottomAnchor = CGPoint(x: geo.size.width / 2, y: 660)
 
             ZStack {
-                placedButtons(topButtons, anchor: topAnchor)
-                placedButtons(bottomButtons, anchor: bottomAnchor)
+                placedButtons(topButtons, anchor: topAnchor, showsWeekChoice: true)
+                placedButtons(bottomButtons, anchor: bottomAnchor, showsWeekChoice: false)
             }
         }
     }
 
-    private func placedButtons(_ items: [PlacedButton], anchor: CGPoint) -> some View {
+    private func placedButtons(
+        _ items: [PlacedButton],
+        anchor: CGPoint,
+        showsWeekChoice: Bool
+    ) -> some View {
         ZStack {
             ForEach(items) { item in
                 HiggledyButton(title: item.title) {
-                    handleTap(title: item.title)
+                    if showsWeekChoice {
+                        withAnimation(.easeInOut(duration: 0.16)) {
+                            pendingExerciseTitle = item.title
+                        }
+                    } else {
+                        handleTap(title: item.title)
+                    }
                 }
                 .rotationEffect(Angle.degrees(item.rotation))
                 .position(x: anchor.x + item.x, y: anchor.y + item.y)
@@ -145,19 +161,120 @@ struct ExerciseHomeView: View {
         }
     }
 
-    private func startRandomStudy() {
-        let termCount = mainTermCount()
-        guard termCount > 0 else { return }
+    // MARK: - Week choice overlay
 
-        let engine = WeekEngine(itemsPerWeek: itemsPerWeek)
-        let totalWeeks = engine.totalWeeks(termCount: termCount)
+    private func weekChoiceOverlay(for exerciseTitle: String) -> some View {
+        ZStack {
+            Color.black.opacity(0.30)
+                .ignoresSafeArea()
+                .contentShape(Rectangle())
+                .onTapGesture {
+                    dismissWeekChoice()
+                }
 
-        let candidateWeeks = (1...totalWeeks).filter { week in
-            totalWeeks == 1 || week != lastRandomWeek
+            VStack(spacing: 16) {
+                HStack(alignment: .center) {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(exerciseTitle)
+                            .font(.system(size: 20, weight: .bold, design: .rounded))
+                            .foregroundStyle(.black)
+
+                        Text("Which week?")
+                            .font(.system(size: 14, weight: .semibold, design: .rounded))
+                            .foregroundStyle(.secondary)
+                    }
+
+                    Spacer()
+
+                    Button {
+                        dismissWeekChoice()
+                    } label: {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 14, weight: .bold))
+                            .foregroundStyle(.secondary)
+                            .frame(width: 32, height: 32)
+                            .background(Color.black.opacity(0.06))
+                            .clipShape(Circle())
+                    }
+                    .buttonStyle(.plain)
+                }
+
+                Button {
+                    openExercise(exerciseTitle, week: currentWeek)
+                } label: {
+                    weekChoiceButton(
+                        title: "Study week",
+                        subtitle: "Week \(currentWeek)"
+                    )
+                }
+                .buttonStyle(.plain)
+
+                Button {
+                    guard let randomWeek = chooseRandomWeek() else { return }
+                    openExercise(exerciseTitle, week: randomWeek)
+                } label: {
+                    weekChoiceButton(
+                        title: "Random week",
+                        subtitle: "Surprise me"
+                    )
+                }
+                .buttonStyle(.plain)
+            }
+            .padding(20)
+            .frame(maxWidth: 330)
+            .background(Color.white.opacity(0.98))
+            .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 24, style: .continuous)
+                    .stroke(Color.green.opacity(0.70), lineWidth: 2)
+            )
+            .shadow(color: Color.black.opacity(0.22), radius: 18, y: 8)
+            .padding(.horizontal, 28)
         }
+        .zIndex(100)
+        .transition(.opacity.combined(with: .scale(scale: 0.96)))
+    }
 
-        guard let randomWeek = candidateWeeks.randomElement() else { return }
-        lastRandomWeek = randomWeek
+    private func weekChoiceButton(title: String, subtitle: String) -> some View {
+        HStack {
+            VStack(alignment: .leading, spacing: 3) {
+                Text(title)
+                    .font(.system(size: 18, weight: .bold, design: .rounded))
+                    .foregroundStyle(.black)
+
+                Text(subtitle)
+                    .font(.system(size: 13, weight: .semibold, design: .rounded))
+                    .foregroundStyle(.secondary)
+            }
+
+            Spacer()
+
+            Image(systemName: "chevron.right")
+                .font(.system(size: 14, weight: .bold))
+                .foregroundStyle(.green)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 14)
+        .frame(maxWidth: .infinity)
+        .background(Color.white)
+        .clipShape(RoundedRectangle(cornerRadius: 17, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 17, style: .continuous)
+                .stroke(Color.green.opacity(0.65), lineWidth: 1.5)
+        )
+        .shadow(color: Color.black.opacity(0.08), radius: 5, y: 2)
+    }
+
+    private func dismissWeekChoice() {
+        withAnimation(.easeInOut(duration: 0.16)) {
+            pendingExerciseTitle = nil
+        }
+    }
+
+    // MARK: - Random study
+
+    private func startRandomStudy() {
+        guard let randomWeek = chooseRandomWeek() else { return }
 
         let exerciseRoutes: [AppRoute] = [
             .listenMatch(language, week: randomWeek),
@@ -171,8 +288,25 @@ struct ExerciseHomeView: View {
 
         guard let randomExercise = exerciseRoutes.randomElement() else { return }
 
-        print("🎲 Random study: \(language.rawValue), week \(randomWeek) of \(totalWeeks), \(randomExercise)")
+        print("🎲 Random study: \(language.rawValue), week \(randomWeek), \(randomExercise)")
         path.append(randomExercise)
+    }
+
+    private func chooseRandomWeek() -> Int? {
+        let termCount = mainTermCount()
+        guard termCount > 0 else { return nil }
+
+        let engine = WeekEngine(itemsPerWeek: itemsPerWeek)
+        let totalWeeks = engine.totalWeeks(termCount: termCount)
+
+        let candidateWeeks = (1...totalWeeks).filter { week in
+            totalWeeks == 1 || week != lastRandomWeek
+        }
+
+        guard let randomWeek = candidateWeeks.randomElement() else { return nil }
+        lastRandomWeek = randomWeek
+
+        return randomWeek
     }
 
     private func mainTermCount() -> Int {
@@ -203,14 +337,49 @@ struct ExerciseHomeView: View {
         }
     }
 
-    private func handleTap(title: String) {
+    // MARK: - Exercise routing
+
+    private func openExercise(_ title: String, week: Int) {
+        guard let route = exerciseRoute(for: title, week: week) else { return }
+        pendingExerciseTitle = nil
+        path.append(route)
+    }
+
+    private func exerciseRoute(for title: String, week: Int) -> AppRoute? {
         switch title {
+        case "Full Study Flow":
+            return .fullStudyFlow(language, week: week)
+
+        case "Listen & Match":
+            return .listenMatch(language, week: week)
+
         case "Match":
-            path.append(AppRoute.match(language, week: currentWeek))
+            return .match(language, week: week)
 
         case "Drag & Fill":
-            path.append(AppRoute.dragAndFill(language, week: currentWeek))
+            return .dragAndFill(language, week: week)
 
+        case "Write":
+            return .write(language, week: week)
+
+        case "Speak":
+            return .speak(language, week: week)
+
+        case "Match & Write":
+            return .matchWrite(language, week: week)
+
+        case "Listen & Write":
+            return .listenWrite(language, week: week)
+
+        default:
+            return nil
+        }
+    }
+
+    // MARK: - Bottom buttons
+
+    private func handleTap(title: String) {
+        switch title {
         case "Choose your weeks!":
             path.append(AppRoute.chooseWeek(language))
 
@@ -219,24 +388,6 @@ struct ExerciseHomeView: View {
 
         case "Start a new week":
             path.append(AppRoute.startNewWeek(language))
-
-        case "Full Study Flow":
-            path.append(AppRoute.fullStudyFlow(language, week: currentWeek))
-
-        case "Listen & Match":
-            path.append(AppRoute.listenMatch(language, week: currentWeek))
-
-        case "Write":
-            path.append(AppRoute.write(language, week: currentWeek))
-
-        case "Speak":
-            path.append(AppRoute.speak(language, week: currentWeek))
-
-        case "Match & Write":
-            path.append(AppRoute.matchWrite(language, week: currentWeek))
-
-        case "Listen & Write":
-            path.append(AppRoute.listenWrite(language, week: currentWeek))
 
         default:
             break

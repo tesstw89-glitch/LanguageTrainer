@@ -11,6 +11,7 @@ struct ExerciseHomeView: View {
     @AppStorage("lastRandomWeek_spanish") private var lastRandomWeekSpanish: Int = 0
 
     @State private var pendingExerciseTitle: String? = nil
+    @State private var showingStarredTerms = false
 
     private var currentWeek: Int {
         get { language == .french ? currentWeekFrench : currentWeekSpanish }
@@ -78,6 +79,12 @@ struct ExerciseHomeView: View {
 
             currentWeek = WeekEngine(itemsPerWeek: itemsPerWeek)
                 .clampWeek(currentWeek, termCount: termCount)
+        }
+        .sheet(isPresented: $showingStarredTerms) {
+            StarredTermsView(
+                language: language,
+                allTerms: LanguageDataLoader.terms(for: language)
+            )
         }
     }
 
@@ -388,6 +395,9 @@ struct ExerciseHomeView: View {
 
         case "Start a new week":
             path.append(AppRoute.startNewWeek(language))
+
+        case "Starred terms":
+            showingStarredTerms = true
 
         default:
             break

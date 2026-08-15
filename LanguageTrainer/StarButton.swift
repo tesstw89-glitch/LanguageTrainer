@@ -27,8 +27,17 @@ struct StarredTermsView: View {
     let language: AppLanguage
     let allTerms: [TermPair]
 
+    private var allStarEligibleTerms: [TermPair] {
+        var seen = Set<UUID>()
+        let combined = allTerms + LanguageDataLoader.lemmas(for: language)
+
+        return combined.filter { term in
+            seen.insert(term.id).inserted
+        }
+    }
+
     private var starredTerms: [TermPair] {
-        allTerms.filter { stars.starredIDs.contains($0.id) }
+        allStarEligibleTerms.filter { stars.starredIDs.contains($0.id) }
     }
 
     var body: some View {
@@ -43,7 +52,7 @@ struct StarredTermsView: View {
                         Text("No starred terms yet")
                             .font(.system(size: 22, weight: .bold, design: .rounded))
 
-                        Text("Star a phrase while studying and it will appear here.")
+                        Text("Star a phrase or chunk while studying and it will appear here.")
                             .font(.system(size: 16, weight: .medium, design: .rounded))
                             .foregroundStyle(.secondary)
                             .multilineTextAlignment(.center)

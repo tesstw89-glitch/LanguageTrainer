@@ -76,24 +76,43 @@ struct MatchWriteView: View {
                         .padding(.horizontal, 18)
                         .padding(.top, 4)
 
-                    // Type box
-                    TextField("Type the \(languageName) here", text: $typed)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled(true)
-                        .submitLabel(.done)
-                        .focused($isTyping)
-                        .onSubmit {
-                            validateTyped()
+                    // Type box + optional keyboard
+                    HStack(spacing: 10) {
+                        TextField("Type the \(languageName) here", text: $typed)
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled(true)
+                            .submitLabel(.done)
+                            .focused($isTyping)
+                            .onSubmit {
+                                validateTyped()
+                            }
+                            .font(.system(size: 18, weight: .semibold, design: .rounded))
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 12)
+                            .background(Color.white)
+                            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                            .onChange(of: typed) { _, _ in
+                                validateTyped()
+                            }
+
+                        Button {
+                            isTyping.toggle()
+                        } label: {
+                            Image(systemName: "keyboard")
+                                .font(.system(size: 20, weight: .semibold))
+                                .foregroundStyle(isTyping ? Color.green : Color.white)
+                                .frame(width: 48, height: 48)
+                                .background(Color.white.opacity(isTyping ? 0.95 : 0.16))
+                                .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                                        .stroke(Color.white.opacity(0.28), lineWidth: 1)
+                                )
                         }
-                        .font(.system(size: 18, weight: .semibold, design: .rounded))
-                        .padding(.horizontal, 14)
-                        .padding(.vertical, 12)
-                        .background(Color.white)
-                        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-                        .padding(.horizontal, 18)
-                        .onChange(of: typed) { _, _ in
-                            validateTyped()
-                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel(isTyping ? "Hide keyboard" : "Show keyboard")
+                    }
+                    .padding(.horizontal, 18)
 
                     // Options
                     VStack(spacing: 10) {
@@ -154,7 +173,7 @@ struct MatchWriteView: View {
         }
         .onAppear {
             startQueue()
-            isTyping = true
+            isTyping = false
         }
     }
 
@@ -199,6 +218,7 @@ struct MatchWriteView: View {
             options = []
             typed = ""
             isCorrect = false
+            isTyping = false
             return
         }
 
@@ -210,6 +230,7 @@ struct MatchWriteView: View {
     private func loadCurrent() {
         isCorrect = false
         typed = ""
+        isTyping = false
 
         guard index < queue.count else {
             current = nil
@@ -219,10 +240,6 @@ struct MatchWriteView: View {
 
         current = queue[index]
         buildOptions()
-
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
-            isTyping = true
-        }
     }
 
     private func next() {

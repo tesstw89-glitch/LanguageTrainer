@@ -19,3 +19,73 @@ struct StarButton: View {
         .buttonStyle(.plain)
     }
 }
+
+struct StarredTermsView: View {
+    @EnvironmentObject private var stars: StarStore
+    @Environment(\.dismiss) private var dismiss
+
+    let language: AppLanguage
+    let allTerms: [TermPair]
+
+    private var starredTerms: [TermPair] {
+        allTerms.filter { stars.starredIDs.contains($0.id) }
+    }
+
+    var body: some View {
+        NavigationStack {
+            Group {
+                if starredTerms.isEmpty {
+                    VStack(spacing: 14) {
+                        Image(systemName: "star")
+                            .font(.system(size: 42, weight: .semibold))
+                            .foregroundStyle(.yellow)
+
+                        Text("No starred terms yet")
+                            .font(.system(size: 22, weight: .bold, design: .rounded))
+
+                        Text("Star a phrase while studying and it will appear here.")
+                            .font(.system(size: 16, weight: .medium, design: .rounded))
+                            .foregroundStyle(.secondary)
+                            .multilineTextAlignment(.center)
+                            .padding(.horizontal, 32)
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else {
+                    List {
+                        Section {
+                            ForEach(starredTerms) { term in
+                                HStack(alignment: .top, spacing: 12) {
+                                    VStack(alignment: .leading, spacing: 6) {
+                                        Text(term.foreign)
+                                            .font(.system(size: 18, weight: .bold, design: .rounded))
+                                            .foregroundStyle(.primary)
+
+                                        Text(term.english)
+                                            .font(.system(size: 15, weight: .medium, design: .rounded))
+                                            .foregroundStyle(.secondary)
+                                    }
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+
+                                    StarButton(id: term.id)
+                                }
+                                .padding(.vertical, 5)
+                            }
+                        } header: {
+                            Text("\(starredTerms.count) starred")
+                        }
+                    }
+                    .listStyle(.insetGrouped)
+                }
+            }
+            .navigationTitle("Starred terms")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Done") {
+                        dismiss()
+                    }
+                }
+            }
+        }
+    }
+}

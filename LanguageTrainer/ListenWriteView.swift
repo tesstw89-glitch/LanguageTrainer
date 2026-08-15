@@ -104,6 +104,10 @@ struct ListenWriteView: View {
 
             Spacer()
 
+            if let current {
+                StarButton(id: current.id)
+            }
+
             Button {
                 dismiss()
             } label: {

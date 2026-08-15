@@ -57,13 +57,19 @@ struct MatchWriteView: View {
             ScrollView {
                 VStack(spacing: 16) {
 
-                    // Progress
+                    // Progress + star
                     HStack {
                         Text("Question \(min(index + 1, max(queue.count, 1))) / \(max(queue.count, 1))")
                             .font(.system(size: 14, weight: .semibold, design: .rounded))
                             .foregroundStyle(.white.opacity(0.65))
 
                         Spacer()
+
+                        if let current {
+                            StarButton(id: current.id)
+                                .background(Color.white.opacity(0.94))
+                                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                        }
                     }
                     .padding(.horizontal, 18)
                     .padding(.top, 10)
@@ -176,10 +182,6 @@ struct MatchWriteView: View {
             isTyping = false
         }
     }
-
-    // MARK: - Source terms
-
-    // MARK: - Source terms
 
     // MARK: - Source terms
 

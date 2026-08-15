@@ -131,17 +131,21 @@ struct ListenMatchView: View {
             VStack(spacing: 10) {
                 ForEach(leftOrder, id: \.self) { id in
                     if let term = visible.first(where: { $0.id == id }) {
-                        ListenToken(isSelected: selectedLeft == id)
-                            .opacity(dissolvingIDs.contains(id) ? 0 : 1)
-                            .scaleEffect(dissolvingIDs.contains(id) ? 0.92 : 1)
-                            .animation(.easeInOut(duration: 0.22), value: dissolvingIDs)
-                            .simultaneousGesture(
-                                TapGesture().onEnded {
+                        HStack(spacing: 8) {
+                            ListenToken(isSelected: selectedLeft == id)
+                                .contentShape(Rectangle())
+                                .onTapGesture {
                                     guard !timeUp else { return }
                                     guard dissolvingIDs.isEmpty else { return }
                                     handleLeftTap(term)
                                 }
-                            )
+
+                            StarButton(id: term.id)
+                        }
+                        .frame(maxWidth: .infinity, alignment: .center)
+                        .opacity(dissolvingIDs.contains(id) ? 0 : 1)
+                        .scaleEffect(dissolvingIDs.contains(id) ? 0.92 : 1)
+                        .animation(.easeInOut(duration: 0.22), value: dissolvingIDs)
                     }
                 }
             }
@@ -328,7 +332,7 @@ struct ListenMatchView: View {
     }
 }
 
-// MARK: - Left token: audio-only
+// MARK: - Left token: square audio-only
 
 private struct ListenToken: View {
     let isSelected: Bool
@@ -349,8 +353,7 @@ private struct ListenToken: View {
                 .font(.system(size: 20, weight: .semibold))
                 .foregroundStyle(Color.black.opacity(0.85))
         }
-        .frame(maxWidth: .infinity)
-        .frame(height: size)
+        .frame(width: size, height: size)
         .contentShape(Rectangle())
     }
 }

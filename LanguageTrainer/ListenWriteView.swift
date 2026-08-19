@@ -24,6 +24,7 @@ struct ListenWriteView: View {
     }
 
     @Environment(\.dismiss) private var dismiss
+    @EnvironmentObject private var starStore: StarStore
     @StateObject private var speaker = SpeechHelper()
 
     private var totalQs: Int {
@@ -48,6 +49,20 @@ struct ListenWriteView: View {
         }
     }
 
+    private var canGoNext: Bool {
+        isCorrect || hasRevealedAnswer
+    }
+
+    private var answerBorderColor: Color {
+        if isCorrect {
+            return .green
+        } else if hasRevealedAnswer {
+            return .blue.opacity(0.75)
+        } else {
+            return .black.opacity(0.15)
+        }
+    }
+
     @State private var queue: [TermPair] = []
     @State private var index: Int = 0
     @State private var current: TermPair? = nil
@@ -55,6 +70,7 @@ struct ListenWriteView: View {
     @State private var typed: String = ""
     @State private var isCorrect: Bool = false
     @State private var hasReportedCorrect: Bool = false
+    @State private var hasRevealedAnswer: Bool = false
 
     @State private var isSentenceRevealed: Bool = false
     @State private var isEnglishRevealed: Bool = false
@@ -71,6 +87,7 @@ struct ListenWriteView: View {
                 controlsView
                 revealedSentenceView
                 answerBox
+                dontKnowButton
                 nextButton
 
                 Spacer()
@@ -219,7 +236,7 @@ struct ListenWriteView: View {
             .background(Color.white.opacity(0.92))
             .overlay(
                 RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .stroke(isCorrect ? Color.green : Color.black.opacity(0.15), lineWidth: 2)
+                    .stroke(answerBorderColor, lineWidth: 2)
             )
             .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
             .shadow(color: Color.black.opacity(0.10), radius: 6, y: 3)
@@ -231,6 +248,32 @@ struct ListenWriteView: View {
             .onSubmit {
                 checkAnswer()
             }
+    }
+
+    @ViewBuilder
+    private var dontKnowButton: some View {
+        if !isCorrect && !hasRevealedAnswer, current != nil {
+            HStack {
+                Button {
+                    revealAnswer()
+                } label: {
+                    HStack(spacing: 7) {
+                        Image(systemName: "questionmark.circle.fill")
+                        Text("I don’t know")
+                    }
+                    .font(.system(size: 15, weight: .bold, design: .rounded))
+                    .foregroundColor(.white)
+                    .padding(.horizontal, 13)
+                    .padding(.vertical, 10)
+                    .background(Color.orange.opacity(0.90))
+                    .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                }
+                .buttonStyle(.plain)
+
+                Spacer()
+            }
+            .padding(.horizontal, 18)
+        }
     }
 
     private var nextButton: some View {
@@ -250,8 +293,8 @@ struct ListenWriteView: View {
         }
         .buttonStyle(.plain)
         .padding(.horizontal, 18)
-        .opacity(isCorrect ? 1 : 0)
-        .allowsHitTesting(isCorrect)
+        .opacity(canGoNext ? 1 : 0)
+        .allowsHitTesting(canGoNext)
     }
 
     // MARK: - Audio
@@ -276,6 +319,8 @@ struct ListenWriteView: View {
             current = nil
             typed = ""
             isCorrect = false
+            hasReportedCorrect = false
+            hasRevealedAnswer = false
             return
         }
 
@@ -293,6 +338,7 @@ struct ListenWriteView: View {
     private func loadCurrent() {
         isCorrect = false
         hasReportedCorrect = false
+        hasRevealedAnswer = false
         typed = ""
         isSentenceRevealed = false
         isEnglishRevealed = false
@@ -313,7 +359,7 @@ struct ListenWriteView: View {
     }
 
     private func next() {
-        guard isCorrect else { return }
+        guard canGoNext else { return }
 
         UIImpactFeedbackGenerator(style: .medium).impactOccurred()
 
@@ -325,6 +371,22 @@ struct ListenWriteView: View {
             index = nextIndex
             loadCurrent()
         }
+    }
+
+    // MARK: - Reveal Answer
+
+    private func revealAnswer() {
+        guard let current else { return }
+
+        hasRevealedAnswer = true
+        hasReportedCorrect = true
+        isSentenceRevealed = true
+
+        starStore.set(current.id, starred: true)
+
+        isFocused = false
+
+        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
     }
 
     // MARK: - Checking
@@ -341,7 +403,7 @@ struct ListenWriteView: View {
             UIImpactFeedbackGenerator(style: .light).impactOccurred()
         }
 
-        if ok && !hasReportedCorrect {
+        if ok && !hasReportedCorrect && !hasRevealedAnswer {
             hasReportedCorrect = true
             onCorrect?(current)
         }

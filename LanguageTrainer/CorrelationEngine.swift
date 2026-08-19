@@ -1,8 +1,15 @@
 import Foundation
+import SwiftUI
+import CryptoKit
 
 struct CorrelationCandidate: Hashable {
     let phrase: String
     let matchCount: Int
+}
+
+enum CorrelationRoute: Hashable {
+    case dragAndFill(AppLanguage, phrase: String)
+    case listenWrite(AppLanguage, phrase: String)
 }
 
 enum CorrelationEngine {
@@ -17,8 +24,13 @@ enum CorrelationEngine {
         "j", "m", "t", "s", "n", "l", "d", "c", "qu"
     ]
 
+    static func allSentenceTerms(for language: AppLanguage) -> [TermPair] {
+        CorrelationSentenceLoader.terms(for: language)
+    }
+
     static func clearCache() {
         candidateCache.removeAll()
+        CorrelationSentenceLoader.clearCache()
     }
 
     static func randomCorrelation(
@@ -107,6 +119,9 @@ enum CorrelationEngine {
                         continue
                     }
 
+                    // IMPORTANT: exclusions apply to the proposed correlation itself only.
+                    // A sentence is never rejected merely because it contains an excluded
+                    // sequence somewhere else in the sentence.
                     guard !exclusions.contains(phrase) else {
                         continue
                     }
@@ -242,5 +257,238 @@ enum CorrelationEngine {
         }
 
         return false
+    }
+}
+
+struct CorrelationExerciseDestination: View {
+    let route: CorrelationRoute
+
+    @ViewBuilder
+    var body: some View {
+        switch route {
+        case .dragAndFill(let language, let phrase):
+            DragFillView(
+                language: language,
+                terms: correlationTerms(language: language, phrase: phrase)
+            )
+            .safeAreaInset(edge: .top, spacing: 0) {
+                CorrelationBanner(phrase: phrase)
+            }
+
+        case .listenWrite(let language, let phrase):
+            ListenWriteView(
+                language: language,
+                terms: correlationTerms(language: language, phrase: phrase),
+                totalQsOverride: 12
+            )
+            .safeAreaInset(edge: .top, spacing: 0) {
+                CorrelationBanner(phrase: phrase)
+            }
+        }
+    }
+
+    private func correlationTerms(
+        language: AppLanguage,
+        phrase: String
+    ) -> [TermPair] {
+        CorrelationEngine.matchingTerms(
+            for: phrase,
+            language: language,
+            terms: CorrelationEngine.allSentenceTerms(for: language)
+        )
+    }
+}
+
+private struct CorrelationBanner: View {
+    let phrase: String
+
+    var body: some View {
+        HStack(spacing: 7) {
+            Image(systemName: "link")
+                .font(.system(size: 13, weight: .bold))
+
+            Text("Correlation: \(phrase)")
+                .font(.system(size: 14, weight: .bold, design: .rounded))
+                .lineLimit(1)
+        }
+        .foregroundStyle(.primary)
+        .padding(.horizontal, 13)
+        .padding(.vertical, 8)
+        .background(.thinMaterial)
+        .clipShape(Capsule())
+        .padding(.top, 6)
+        .padding(.bottom, 6)
+    }
+}
+
+private enum CorrelationSentenceLoader {
+    private static var cache: [AppLanguage: [TermPair]] = [:]
+
+    static func clearCache() {
+        cache.removeAll()
+    }
+
+    static func terms(for language: AppLanguage) -> [TermPair] {
+        if let cached = cache[language] {
+            return cached
+        }
+
+        let resourceName = language == .french ? "french_terms" : "spanish_terms"
+
+        guard let url =
+                Bundle.main.url(forResource: resourceName, withExtension: "json") ??
+                Bundle.main.url(forResource: resourceName, withExtension: "JSON")
+        else {
+            print("❌ Missing \(resourceName).json for correlations")
+            return []
+        }
+
+        do {
+            let rawData = try Data(contentsOf: url)
+            let cleanedString = String(decoding: rawData, as: UTF8.self)
+
+            guard let cleanedData = cleanedString.data(using: .utf8) else {
+                return []
+            }
+
+            let decoded = try JSONDecoder().decode([RawEntry].self, from: cleanedData)
+
+            let loaded = decoded.compactMap { raw -> TermPair? in
+                let foreign = clean(raw.foreign)
+                let english = clean(raw.english)
+                let context: String? = {
+                    guard let rawContext = raw.context else { return nil }
+                    let cleanedContext = clean(rawContext)
+                    return cleanedContext.isEmpty ? nil : cleanedContext
+                }()
+
+                guard !foreign.isEmpty, !english.isEmpty else { return nil }
+
+                return TermPair(
+                    id: stableID(
+                        prefix: "SENTENCE",
+                        language: language,
+                        foreign: foreign,
+                        english: english
+                    ),
+                    foreign: foreign,
+                    english: english,
+                    context: context
+                )
+            }
+
+            if !loaded.isEmpty {
+                cache[language] = loaded
+            }
+
+            return loaded
+        } catch {
+            print("❌ Correlation JSON decode failed for \(resourceName).json:", error)
+            return []
+        }
+    }
+
+    private static func clean(_ text: String) -> String {
+        var value = text
+            .replacingOccurrences(of: "’", with: "'")
+            .replacingOccurrences(of: "‘", with: "'")
+            .replacingOccurrences(of: "´", with: "'")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+
+        while value.contains("  ") {
+            value = value.replacingOccurrences(of: "  ", with: " ")
+        }
+
+        return value
+    }
+
+    private static func stableID(
+        prefix: String,
+        language: AppLanguage,
+        foreign: String,
+        english: String
+    ) -> UUID {
+        let raw = "\(prefix)|\(language.rawValue)|\(foreign)|\(english)"
+        let digest = SHA256.hash(data: Data(raw.utf8))
+        let bytes = Array(digest.prefix(16))
+
+        return UUID(uuid: (
+            bytes[0], bytes[1], bytes[2], bytes[3],
+            bytes[4], bytes[5], bytes[6], bytes[7],
+            bytes[8], bytes[9], bytes[10], bytes[11],
+            bytes[12], bytes[13], bytes[14], bytes[15]
+        ))
+    }
+
+    private struct RawEntry: Decodable {
+        let foreign: String
+        let english: String
+        let context: String?
+
+        private struct AnyKey: CodingKey {
+            var stringValue: String
+            var intValue: Int? { nil }
+
+            init?(stringValue: String) {
+                self.stringValue = stringValue
+            }
+
+            init?(intValue: Int) {
+                nil
+            }
+        }
+
+        init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: AnyKey.self)
+
+            foreign = try Self.decodeString(
+                from: container,
+                keys: ["foreign", "Foreign"]
+            )
+
+            english = try Self.decodeString(
+                from: container,
+                keys: ["english", "English"]
+            )
+
+            context = try Self.decodeOptionalString(
+                from: container,
+                keys: ["context", "Context"]
+            )
+        }
+
+        private static func decodeString(
+            from container: KeyedDecodingContainer<AnyKey>,
+            keys: [String]
+        ) throws -> String {
+            for keyName in keys {
+                if let key = AnyKey(stringValue: keyName),
+                   let value = try container.decodeIfPresent(String.self, forKey: key) {
+                    return value
+                }
+            }
+
+            throw DecodingError.keyNotFound(
+                AnyKey(stringValue: keys.first ?? "unknown")!,
+                .init(
+                    codingPath: container.codingPath,
+                    debugDescription: "Missing keys \(keys)"
+                )
+            )
+        }
+
+        private static func decodeOptionalString(
+            from container: KeyedDecodingContainer<AnyKey>,
+            keys: [String]
+        ) throws -> String? {
+            for keyName in keys {
+                if let key = AnyKey(stringValue: keyName),
+                   let value = try container.decodeIfPresent(String.self, forKey: key) {
+                    return value
+                }
+            }
+
+            return nil
+        }
     }
 }

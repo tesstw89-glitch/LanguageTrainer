@@ -94,43 +94,28 @@ enum CorrelationEngine {
         }
 
         let exclusions = exclusionSet(for: language)
+        let meaningfulCandidates = meaningfulCandidateSet(
+            for: language,
+            exclusions: exclusions
+        )
+
+        guard !meaningfulCandidates.isEmpty else {
+            candidateCache[language] = []
+            return []
+        }
+
         var counts: [String: Int] = [:]
 
         for term in terms {
             let sentenceTokens = tokens(for: term.foreign, language: language)
             guard sentenceTokens.count >= 2 else { continue }
 
-            var seenInSentence = Set<String>()
+            let sentenceCandidates = candidatePhrases(
+                from: sentenceTokens,
+                exclusions: exclusions
+            )
 
-            for start in sentenceTokens.indices {
-                let maximumLength = min(
-                    maximumInternalTokenSpan,
-                    sentenceTokens.count - start
-                )
-
-                guard maximumLength >= 2 else { continue }
-
-                for length in 2...maximumLength {
-                    let slice = Array(sentenceTokens[start..<(start + length)])
-                    let phrase = render(slice)
-                    let displayedWordCount = phrase.split(whereSeparator: { $0.isWhitespace }).count
-
-                    guard displayedWordCount == 2 || displayedWordCount == 3 else {
-                        continue
-                    }
-
-                    // IMPORTANT: exclusions apply to the proposed correlation itself only.
-                    // A sentence is never rejected merely because it contains an excluded
-                    // sequence somewhere else in the sentence.
-                    guard !exclusions.contains(phrase) else {
-                        continue
-                    }
-
-                    seenInSentence.insert(phrase)
-                }
-            }
-
-            for phrase in seenInSentence {
+            for phrase in sentenceCandidates where meaningfulCandidates.contains(phrase) {
                 counts[phrase, default: 0] += 1
             }
         }
@@ -152,7 +137,67 @@ enum CorrelationEngine {
         return result
     }
 
-    // MARK: - Exact candidate exclusions
+    // MARK: - Candidate gates
+
+    private static func meaningfulCandidateSet(
+        for language: AppLanguage,
+        exclusions: Set<String>
+    ) -> Set<String> {
+        var result = Set<String>()
+
+        // Candidate phrases must come from the user's curated lemma/chunk material.
+        // We also allow 2–3-word sub-chunks of a longer curated lemma so useful
+        // recurring pieces can still correlate with inflected sentence forms.
+        for lemma in LanguageDataLoader.lemmas(for: language) {
+            let lemmaTokens = tokens(for: lemma.foreign, language: language)
+            result.formUnion(
+                candidatePhrases(
+                    from: lemmaTokens,
+                    exclusions: exclusions
+                )
+            )
+        }
+
+        return result
+    }
+
+    private static func candidatePhrases(
+        from sourceTokens: [String],
+        exclusions: Set<String>
+    ) -> Set<String> {
+        guard sourceTokens.count >= 2 else { return [] }
+
+        var result = Set<String>()
+
+        for start in sourceTokens.indices {
+            let maximumLength = min(
+                maximumInternalTokenSpan,
+                sourceTokens.count - start
+            )
+
+            guard maximumLength >= 2 else { continue }
+
+            for length in 2...maximumLength {
+                let slice = Array(sourceTokens[start..<(start + length)])
+                let phrase = render(slice)
+                let displayedWordCount = phrase.split(whereSeparator: { $0.isWhitespace }).count
+
+                guard displayedWordCount == 2 || displayedWordCount == 3 else {
+                    continue
+                }
+
+                // Exact candidate exclusion only. A longer correlation is still allowed
+                // even if it happens to contain a shorter excluded sequence.
+                guard !exclusions.contains(phrase) else {
+                    continue
+                }
+
+                result.insert(phrase)
+            }
+        }
+
+        return result
+    }
 
     private static func exclusionSet(for language: AppLanguage) -> Set<String> {
         let raw: String
@@ -391,8 +436,6 @@ private enum CorrelationSentenceLoader {
     private static func clean(_ text: String) -> String {
         var value = text
             .replacingOccurrences(of: "’", with: "'")
-            .replacingOccurrences(of: "‘", with: "'")
-            .replacingOccurrences(of: "´", with: "'")
             .trimmingCharacters(in: .whitespacesAndNewlines)
 
         while value.contains("  ") {

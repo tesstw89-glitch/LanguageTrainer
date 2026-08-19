@@ -477,7 +477,7 @@ private enum CorrelationSentenceLoader {
             }
 
             init?(intValue: Int) {
-                nil
+                return nil
             }
         }
 

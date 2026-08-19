@@ -5,14 +5,12 @@ enum AppRoute: Hashable {
 
     case match(AppLanguage, week: Int)
     case dragAndFill(AppLanguage, week: Int)
-    case dragAndFillCorrelation(AppLanguage, phrase: String)
     case speak(AppLanguage, week: Int)
     case listenMatch(AppLanguage, week: Int)
     case write(AppLanguage, week: Int)
     case matchWrite(AppLanguage, week: Int)
     case fullStudyFlow(AppLanguage, week: Int)
     case listenWrite(AppLanguage, week: Int)
-    case listenWriteCorrelation(AppLanguage, phrase: String)
 
     // ✅ LESSONS
     case lessonsHome(AppLanguage)

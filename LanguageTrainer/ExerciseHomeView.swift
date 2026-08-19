@@ -9,9 +9,12 @@ struct ExerciseHomeView: View {
     @AppStorage("currentWeek_spanish") private var currentWeekSpanish: Int = 1
     @AppStorage("lastRandomWeek_french") private var lastRandomWeekFrench: Int = 0
     @AppStorage("lastRandomWeek_spanish") private var lastRandomWeekSpanish: Int = 0
+    @AppStorage("lastCorrelation_french") private var lastCorrelationFrench: String = ""
+    @AppStorage("lastCorrelation_spanish") private var lastCorrelationSpanish: String = ""
 
     @State private var pendingExerciseTitle: String? = nil
     @State private var showingStarredTerms = false
+    @State private var showingCorrelationUnavailable = false
 
     private var currentWeek: Int {
         get { language == .french ? currentWeekFrench : currentWeekSpanish }
@@ -26,6 +29,14 @@ struct ExerciseHomeView: View {
         nonmutating set {
             if language == .french { lastRandomWeekFrench = newValue }
             else { lastRandomWeekSpanish = newValue }
+        }
+    }
+
+    private var lastCorrelation: String {
+        get { language == .french ? lastCorrelationFrench : lastCorrelationSpanish }
+        nonmutating set {
+            if language == .french { lastCorrelationFrench = newValue }
+            else { lastCorrelationSpanish = newValue }
         }
     }
 
@@ -73,6 +84,9 @@ struct ExerciseHomeView: View {
             }
         }
         .navigationBarTitleDisplayMode(.inline)
+        .navigationDestination(for: CorrelationRoute.self) { route in
+            CorrelationExerciseDestination(route: route)
+        }
         .onAppear {
             let termCount = mainTermCount()
             guard termCount > 0 else { return }
@@ -85,6 +99,11 @@ struct ExerciseHomeView: View {
                 language: language,
                 allTerms: LanguageDataLoader.terms(for: language)
             )
+        }
+        .alert("Correlations", isPresented: $showingCorrelationUnavailable) {
+            Button("OK", role: .cancel) { }
+        } message: {
+            Text("I couldn't find a correlation with at least \(CorrelationEngine.minimumMatches) matching sentences.")
         }
     }
 
@@ -168,10 +187,12 @@ struct ExerciseHomeView: View {
         }
     }
 
-    // MARK: - Week choice overlay
+    // MARK: - Week / source choice overlay
 
     private func weekChoiceOverlay(for exerciseTitle: String) -> some View {
-        ZStack {
+        let hasCorrelations = supportsCorrelations(exerciseTitle)
+
+        return ZStack {
             Color.black.opacity(0.30)
                 .ignoresSafeArea()
                 .contentShape(Rectangle())
@@ -186,7 +207,7 @@ struct ExerciseHomeView: View {
                             .font(.system(size: 20, weight: .bold, design: .rounded))
                             .foregroundStyle(.black)
 
-                        Text("Which week?")
+                        Text(hasCorrelations ? "Choose a source" : "Which week?")
                             .font(.system(size: 14, weight: .semibold, design: .rounded))
                             .foregroundStyle(.secondary)
                     }
@@ -226,6 +247,18 @@ struct ExerciseHomeView: View {
                     )
                 }
                 .buttonStyle(.plain)
+
+                if hasCorrelations {
+                    Button {
+                        openCorrelationExercise(exerciseTitle)
+                    } label: {
+                        weekChoiceButton(
+                            title: "Correlations",
+                            subtitle: "Same 2–3 words across every sentence"
+                        )
+                    }
+                    .buttonStyle(.plain)
+                }
             }
             .padding(20)
             .frame(maxWidth: 330)
@@ -275,6 +308,52 @@ struct ExerciseHomeView: View {
     private func dismissWeekChoice() {
         withAnimation(.easeInOut(duration: 0.16)) {
             pendingExerciseTitle = nil
+        }
+    }
+
+    private func supportsCorrelations(_ exerciseTitle: String) -> Bool {
+        exerciseTitle == "Drag & Fill" || exerciseTitle == "Listen & Write"
+    }
+
+    private func openCorrelationExercise(_ exerciseTitle: String) {
+        let allTerms = CorrelationEngine.allSentenceTerms(for: language)
+        let previous = lastCorrelation.isEmpty ? nil : lastCorrelation
+
+        guard let candidate = CorrelationEngine.randomCorrelation(
+            for: language,
+            terms: allTerms,
+            excluding: previous
+        ) else {
+            showingCorrelationUnavailable = true
+            return
+        }
+
+        lastCorrelation = candidate.phrase
+        pendingExerciseTitle = nil
+
+        print(
+            "🔗 Correlation study: \(language.rawValue), \(candidate.phrase), \(candidate.matchCount) sentences"
+        )
+
+        switch exerciseTitle {
+        case "Drag & Fill":
+            path.append(
+                CorrelationRoute.dragAndFill(
+                    language,
+                    phrase: candidate.phrase
+                )
+            )
+
+        case "Listen & Write":
+            path.append(
+                CorrelationRoute.listenWrite(
+                    language,
+                    phrase: candidate.phrase
+                )
+            )
+
+        default:
+            break
         }
     }
 

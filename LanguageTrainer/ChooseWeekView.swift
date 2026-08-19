@@ -53,6 +53,14 @@ struct ChooseWeekView: View {
         }
     }
 
+    private var selectedListenWriteTerms: [TermPair] {
+        var seen = Set<UUID>()
+
+        return (selectedSentenceTerms + selectedLemmaTerms).filter { term in
+            seen.insert(term.id).inserted
+        }
+    }
+
     private var selectedWeeksLabel: String {
         if sortedSelectedWeeks.isEmpty { return "None" }
         return sortedSelectedWeeks.map { "Week \($0)" }.joined(separator: ", ")
@@ -156,7 +164,7 @@ struct ChooseWeekView: View {
                     NavigationLink("Listen & Write") {
                         ListenWriteView(
                             language: language,
-                            terms: selectedLemmaTerms,
+                            terms: selectedListenWriteTerms,
                             totalQsOverride: 12
                         )
                     }

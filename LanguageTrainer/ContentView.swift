@@ -89,7 +89,7 @@ struct ContentView: View {
         case .listenWrite(let lang, let week):
             ListenWriteView(
                 language: lang,
-                terms: lemmaTerms(for: lang, week: week),
+                terms: listenWriteTerms(for: lang, week: week),
                 totalQsOverride: 12
             )
 
@@ -159,6 +159,15 @@ struct ContentView: View {
 
         return WeekEngine(itemsPerWeek: itemsPerWeek)
             .lemmaTerms(forWeek: week, allLessons: items)
+    }
+
+    private func listenWriteTerms(for language: AppLanguage, week: Int) -> [TermPair] {
+        var seen = Set<UUID>()
+        let combined = sentenceTerms(for: language, week: week) + lemmaTerms(for: language, week: week)
+
+        return combined.filter { term in
+            seen.insert(term.id).inserted
+        }
     }
 
     private func langButton(_ title: String, color: Color) -> some View {
